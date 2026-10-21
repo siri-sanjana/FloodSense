@@ -47,6 +47,18 @@ const FLOODNET_CLASSES = [
   { name: 'grass', color: '#04fa07' },
 ];
 
+async function fetchSampleImage(sampleId: string): Promise<File> {
+  const response = await fetch(`/samples/${sampleId}.jpg`);
+  if (!response.ok) {
+    throw new Error(`Could not load FloodNet demo image ${sampleId} (${response.status}).`);
+  }
+
+  const image = await response.blob();
+  return new File([image], `floodnet-${sampleId}.jpg`, {
+    type: image.type || 'image/jpeg',
+  });
+}
+
 function mapDamageStats(metrics: Record<string, any>): DamageStats {
   const summary = metrics.damage_summary || {};
   const buildings = metrics.buildings || {};
@@ -318,9 +330,9 @@ export default function ChatPage({ params }: ChatPageProps) {
           ? previous.map((message) => message.id === userMsg.id ? displayUserMessage : message)
           : [...previous, displayUserMessage],
       );
+      const analysisImage = imageFile || await fetchSampleImage(sampleId);
       const analysis = await api.analyze({
-        image: imageFile || undefined,
-        sample_id: imageFile ? undefined : sampleId,
+        image: analysisImage,
         model: 'segformer',
         use_recommended: false,
       });

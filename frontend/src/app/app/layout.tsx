@@ -159,9 +159,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <div className="p-3.5 border-b border-slate-200 space-y-3 bg-white">
         <div className="flex items-center justify-between">
           <FloodSenseLogo size="sm" href="/app" />
-          <span className="text-[10px] text-cyan-800 px-1.5 py-0.5 bg-cyan-50 border border-cyan-200 rounded font-medium">
-            Studio
-          </span>
         </div>
 
         {/* New Chat Button */}

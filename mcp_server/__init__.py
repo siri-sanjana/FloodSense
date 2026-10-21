@@ -1,0 +1,1 @@
+"""FloodSense MCP server package."""

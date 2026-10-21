@@ -1,0 +1,76 @@
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
+
+@layer base {
+  :root {
+    --bg-primary: #FFFFFF;
+    --bg-secondary: #F8FAFC;
+    --bg-surface: #FFFFFF;
+    --bg-card: #FFFFFF;
+    --border-hairline: #E2E8F0;
+    --border-subtle: #CBD5E1;
+    --text-primary: #0F172A;
+    --text-secondary: #475569;
+    --text-muted: #64748B;
+    --accent-cyan: #00B8D9;
+    --accent-cyan-deep: #0094B0;
+    --accent-blue: #0284C7;
+  }
+
+  html {
+    background-color: #FFFFFF;
+    color: #0F172A;
+    font-family: "Roboto", var(--font-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: #FFFFFF;
+    color: #0F172A;
+    min-height: 100vh;
+    position: relative;
+    overflow-x: hidden;
+  }
+}
+
+/* Hairline dividers for clean architectural borders */
+.hairline-b {
+  border-bottom: 1px solid #E2E8F0;
+}
+.hairline-t {
+  border-top: 1px solid #E2E8F0;
+}
+.hairline-r {
+  border-right: 1px solid #E2E8F0;
+}
+.hairline-l {
+  border-left: 1px solid #E2E8F0;
+}
+.hairline-all {
+  border: 1px solid #E2E8F0;
+}
+
+/* Clean minimal scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F1F5F9;
+}
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+/* Clean accessible focus outline */
+:focus-visible {
+  outline: 2px solid #00B8D9;
+  outline-offset: 2px;
+}

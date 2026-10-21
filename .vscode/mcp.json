@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "floodsense": {
+      "type": "stdio",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "args": ["-m", "mcp_server"],
+      "env": {
+        "FLOODSENSE_BACKEND_URL": "http://localhost:5050"
+      }
+    }
+  }
+}

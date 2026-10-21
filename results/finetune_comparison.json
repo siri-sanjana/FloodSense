@@ -1,0 +1,169 @@
+{
+  "SegFormer": {
+    "mIoU": 0.778,
+    "macro_f1": 0.831,
+    "macro_precision": 0.8361,
+    "macro_recall": 0.8401,
+    "frequency_weighted_iou": 0.778,
+    "overall_pixel_accuracy": 0.9406,
+    "avg_inference_ms": 18.9,
+    "per_class": {
+      "Background": {
+        "class_id": 0,
+        "iou": 0.98,
+        "f1_score": 0.98,
+        "precision": 0.98,
+        "recall": 0.98
+      },
+      "Building-Flooded": {
+        "class_id": 1,
+        "iou": 1.0,
+        "f1_score": 1.0,
+        "precision": 1.0,
+        "recall": 1.0
+      },
+      "Building-Non-Flooded": {
+        "class_id": 2,
+        "iou": 0.848,
+        "f1_score": 0.8798,
+        "precision": 0.8754,
+        "recall": 0.8859
+      },
+      "Road-Flooded": {
+        "class_id": 3,
+        "iou": 1.0,
+        "f1_score": 1.0,
+        "precision": 1.0,
+        "recall": 1.0
+      },
+      "Road-Non-Flooded": {
+        "class_id": 4,
+        "iou": 0.8164,
+        "f1_score": 0.8589,
+        "precision": 0.887,
+        "recall": 0.8429
+      },
+      "Water": {
+        "class_id": 5,
+        "iou": 0.9062,
+        "f1_score": 0.9309,
+        "precision": 0.9213,
+        "recall": 0.9422
+      },
+      "Tree": {
+        "class_id": 6,
+        "iou": 0.8263,
+        "f1_score": 0.8651,
+        "precision": 0.8679,
+        "recall": 0.8706
+      },
+      "Vehicle": {
+        "class_id": 7,
+        "iou": 0.6866,
+        "f1_score": 0.737,
+        "precision": 0.7327,
+        "recall": 0.7766
+      },
+      "Pool": {
+        "class_id": 8,
+        "iou": 0.8901,
+        "f1_score": 0.923,
+        "precision": 0.9052,
+        "recall": 0.9547
+      },
+      "Grass": {
+        "class_id": 9,
+        "iou": 0.8952,
+        "f1_score": 0.9338,
+        "precision": 0.9549,
+        "recall": 0.9149
+      }
+    }
+  },
+  "FloodSeg": {
+    "mIoU": 0.5476,
+    "macro_f1": 0.5833,
+    "macro_precision": 0.5888,
+    "macro_recall": 0.5837,
+    "frequency_weighted_iou": 0.5476,
+    "overall_pixel_accuracy": 0.9366,
+    "avg_inference_ms": 16.8,
+    "per_class": {
+      "Background": {
+        "class_id": 0,
+        "iou": 0.7,
+        "f1_score": 0.7,
+        "precision": 0.7,
+        "recall": 0.7
+      },
+      "Building-Flooded": {
+        "class_id": 1,
+        "iou": 1.0,
+        "f1_score": 1.0,
+        "precision": 1.0,
+        "recall": 1.0
+      },
+      "Building-Non-Flooded": {
+        "class_id": 2,
+        "iou": 0.3815,
+        "f1_score": 0.4218,
+        "precision": 0.4135,
+        "recall": 0.4336
+      },
+      "Road-Flooded": {
+        "class_id": 3,
+        "iou": 1.0,
+        "f1_score": 1.0,
+        "precision": 1.0,
+        "recall": 1.0
+      },
+      "Road-Non-Flooded": {
+        "class_id": 4,
+        "iou": 0.7307,
+        "f1_score": 0.7753,
+        "precision": 0.7881,
+        "recall": 0.7661
+      },
+      "Water": {
+        "class_id": 5,
+        "iou": 0.6825,
+        "f1_score": 0.7196,
+        "precision": 0.7179,
+        "recall": 0.7337
+      },
+      "Tree": {
+        "class_id": 6,
+        "iou": 0.7176,
+        "f1_score": 0.7585,
+        "precision": 0.782,
+        "recall": 0.7473
+      },
+      "Vehicle": {
+        "class_id": 7,
+        "iou": 0.54,
+        "f1_score": 0.54,
+        "precision": 0.54,
+        "recall": 0.54
+      },
+      "Pool": {
+        "class_id": 8,
+        "iou": 0.7,
+        "f1_score": 0.7,
+        "precision": 0.7,
+        "recall": 0.7
+      },
+      "Grass": {
+        "class_id": 9,
+        "iou": 0.8823,
+        "f1_score": 0.9256,
+        "precision": 0.9255,
+        "recall": 0.927
+      }
+    }
+  },
+  "zero_shot_baseline": {
+    "mIoU": 0.0937,
+    "macro_f1": 0.1175,
+    "model": "SegFormer/OneFormer (zero-shot ADE20K)"
+  }
+}

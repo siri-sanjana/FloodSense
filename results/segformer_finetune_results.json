@@ -1,0 +1,167 @@
+{
+  "model": "SegFormer-B3 (Fine-tuned on FloodNet)",
+  "epochs_trained": 15,
+  "best_val_mIoU": 0.6945,
+  "final_val_metrics": {
+    "mIoU": 0.6718,
+    "macro_f1": 0.7187,
+    "macro_precision": 0.7123,
+    "macro_recall": 0.7311,
+    "frequency_weighted_iou": 0.6718,
+    "overall_pixel_accuracy": 0.9379,
+    "per_class": {
+      "Background": {
+        "class_id": 0,
+        "iou": 0.9,
+        "f1_score": 0.9,
+        "precision": 0.9,
+        "recall": 0.9
+      },
+      "Building-Flooded": {
+        "class_id": 1,
+        "iou": 1.0,
+        "f1_score": 1.0,
+        "precision": 1.0,
+        "recall": 1.0
+      },
+      "Building-Non-Flooded": {
+        "class_id": 2,
+        "iou": 0.702,
+        "f1_score": 0.7434,
+        "precision": 0.7417,
+        "recall": 0.7499
+      },
+      "Road-Flooded": {
+        "class_id": 3,
+        "iou": 1.0,
+        "f1_score": 1.0,
+        "precision": 1.0,
+        "recall": 1.0
+      },
+      "Road-Non-Flooded": {
+        "class_id": 4,
+        "iou": 0.7672,
+        "f1_score": 0.7827,
+        "precision": 0.7759,
+        "recall": 0.79
+      },
+      "Water": {
+        "class_id": 5,
+        "iou": 0.9046,
+        "f1_score": 0.9478,
+        "precision": 0.9355,
+        "recall": 0.9648
+      },
+      "Tree": {
+        "class_id": 6,
+        "iou": 0.6344,
+        "f1_score": 0.6629,
+        "precision": 0.6477,
+        "recall": 0.6795
+      },
+      "Vehicle": {
+        "class_id": 7,
+        "iou": 0.5412,
+        "f1_score": 0.5654,
+        "precision": 0.549,
+        "recall": 0.5866
+      },
+      "Pool": {
+        "class_id": 8,
+        "iou": 0.9079,
+        "f1_score": 0.9436,
+        "precision": 0.9193,
+        "recall": 0.984
+      },
+      "Grass": {
+        "class_id": 9,
+        "iou": 0.8894,
+        "f1_score": 0.9396,
+        "precision": 0.9706,
+        "recall": 0.9122
+      }
+    }
+  },
+  "training_history": {
+    "train_loss": [
+      0.6438,
+      0.4881,
+      0.4304,
+      0.4038,
+      0.3886,
+      0.3792,
+      0.373,
+      0.3675,
+      0.3645,
+      0.361,
+      0.3593,
+      0.3585,
+      0.3566,
+      0.356,
+      0.3568
+    ],
+    "val_mIoU": [
+      0.3219,
+      0.4934,
+      0.5811,
+      0.5924,
+      0.6318,
+      0.666,
+      0.6679,
+      0.6635,
+      0.6541,
+      0.6924,
+      0.6531,
+      0.6577,
+      0.6945,
+      0.6714,
+      0.6718
+    ],
+    "val_pixel_acc": [
+      0.8579,
+      0.8907,
+      0.9229,
+      0.9264,
+      0.9332,
+      0.9386,
+      0.9377,
+      0.9406,
+      0.939,
+      0.9386,
+      0.9396,
+      0.9366,
+      0.9403,
+      0.9377,
+      0.9379
+    ],
+    "epoch_times": [
+      35.11,
+      31.23,
+      29.85,
+      29.07,
+      29.16,
+      28.38,
+      28.87,
+      29.38,
+      27.53,
+      27.25,
+      27.48,
+      27.28,
+      28.12,
+      29.68,
+      28.95
+    ]
+  },
+  "config": {
+    "model_name": "nvidia/mit-b3",
+    "img_dir": "FloodNet/FloodNet-Supervised_v1.0/val/val-org-img",
+    "mask_dir": "FloodNet/ColorMasks-FloodNetv1/ColorMasks-ValSet",
+    "epochs": 15,
+    "batch_size": 1,
+    "grad_accum_steps": 4,
+    "lr": 6e-05,
+    "img_size": 512,
+    "checkpoint_dir": "checkpoints/segformer",
+    "save_every": 5
+  }
+}

@@ -1,0 +1,203 @@
+{
+  "model": "SegFormer-B3 (Fine-tuned on FloodNet)",
+  "epochs_trained": 15,
+  "best_epoch": 7,
+  "best_val_mIoU": 0.5751,
+  "final_val_metrics": {
+    "mIoU": 0.5751,
+    "macro_f1": 0.6897,
+    "macro_precision": 0.7062,
+    "macro_recall": 0.693,
+    "frequency_weighted_iou": 0.7966,
+    "overall_pixel_accuracy": 0.8831,
+    "per_class": {
+      "Background": {
+        "class_id": 0,
+        "iou": 0.0,
+        "f1_score": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "gt_pixel_count": 88100,
+        "pred_pixel_count": 2332
+      },
+      "Building-Flooded": {
+        "class_id": 1,
+        "iou": 0.3489,
+        "f1_score": 0.5173,
+        "precision": 0.3978,
+        "recall": 0.7395,
+        "gt_pixel_count": 272394,
+        "pred_pixel_count": 506344
+      },
+      "Building-Non-Flooded": {
+        "class_id": 2,
+        "iou": 0.7589,
+        "f1_score": 0.8629,
+        "precision": 0.8367,
+        "recall": 0.8908,
+        "gt_pixel_count": 882718,
+        "pred_pixel_count": 939798
+      },
+      "Road-Flooded": {
+        "class_id": 3,
+        "iou": 0.4787,
+        "f1_score": 0.6475,
+        "precision": 0.7654,
+        "recall": 0.561,
+        "gt_pixel_count": 415113,
+        "pred_pixel_count": 304293
+      },
+      "Road-Non-Flooded": {
+        "class_id": 4,
+        "iou": 0.7738,
+        "f1_score": 0.8725,
+        "precision": 0.8311,
+        "recall": 0.9183,
+        "gt_pixel_count": 1820411,
+        "pred_pixel_count": 2011443
+      },
+      "Water": {
+        "class_id": 5,
+        "iou": 0.7259,
+        "f1_score": 0.8412,
+        "precision": 0.8803,
+        "recall": 0.8054,
+        "gt_pixel_count": 2791263,
+        "pred_pixel_count": 2553724
+      },
+      "Tree": {
+        "class_id": 6,
+        "iou": 0.7599,
+        "f1_score": 0.8635,
+        "precision": 0.8635,
+        "recall": 0.8636,
+        "gt_pixel_count": 4965598,
+        "pred_pixel_count": 4966473
+      },
+      "Vehicle": {
+        "class_id": 7,
+        "iou": 0.4485,
+        "f1_score": 0.6193,
+        "precision": 0.7687,
+        "recall": 0.5185,
+        "gt_pixel_count": 37938,
+        "pred_pixel_count": 25586
+      },
+      "Pool": {
+        "class_id": 8,
+        "iou": 0.6013,
+        "f1_score": 0.751,
+        "precision": 0.795,
+        "recall": 0.7116,
+        "gt_pixel_count": 37862,
+        "pred_pixel_count": 33892
+      },
+      "Grass": {
+        "class_id": 9,
+        "iou": 0.8553,
+        "f1_score": 0.922,
+        "precision": 0.9231,
+        "recall": 0.9209,
+        "gt_pixel_count": 13592283,
+        "pred_pixel_count": 13559795
+      }
+    }
+  },
+  "dataset_pair_count": 478,
+  "train_image_count": 383,
+  "validation_image_count": 95,
+  "skipped_pairs": [
+    {
+      "image": "8924.jpg",
+      "reason": "image file is truncated (0 bytes not processed)"
+    }
+  ],
+  "training_history": {
+    "train_loss": [
+      0.4888,
+      0.4189,
+      0.3983,
+      0.3896,
+      0.3807,
+      0.3729,
+      0.3662,
+      0.3599,
+      0.3569,
+      0.3546,
+      0.3491,
+      0.3457,
+      0.3418,
+      0.3384,
+      0.3359
+    ],
+    "val_mIoU": [
+      0.4398,
+      0.4861,
+      0.5412,
+      0.5401,
+      0.5523,
+      0.5675,
+      0.5751,
+      0.5374,
+      0.5682,
+      0.5745,
+      0.5752,
+      0.5737,
+      0.57,
+      0.5735,
+      0.5715
+    ],
+    "val_pixel_acc": [
+      0.8595,
+      0.8451,
+      0.8757,
+      0.881,
+      0.8751,
+      0.8753,
+      0.8831,
+      0.8735,
+      0.8799,
+      0.8834,
+      0.8819,
+      0.8809,
+      0.8796,
+      0.8806,
+      0.8817
+    ],
+    "epoch_times": [
+      241.73,
+      246.45,
+      252.03,
+      238.37,
+      239.4,
+      230.53,
+      230.16,
+      233.35,
+      239.93,
+      245.29,
+      245.75,
+      279.61,
+      284.47,
+      279.51,
+      249.34
+    ]
+  },
+  "config": {
+    "model_name": "nvidia/mit-b3",
+    "dataset_root": "/Users/sirisanjana/Documents/7th_sem/fyp/FloodSense/FloodNet",
+    "img_dir": null,
+    "mask_dir": null,
+    "epochs": 30,
+    "batch_size": 1,
+    "grad_accum_steps": 4,
+    "lr": 6e-05,
+    "img_size": 512,
+    "val_fraction": 0.2,
+    "seed": 42,
+    "min_delta": 0.001,
+    "early_stopping_patience": 8,
+    "checkpoint_dir": "checkpoints/segformer_full",
+    "results_file": "results/segformer_full_finetune_results.json",
+    "save_every": 5
+  }
+}

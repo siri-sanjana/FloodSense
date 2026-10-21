@@ -4,8 +4,10 @@ emoji: 🌊
 colorFrom: blue
 colorTo: cyan
 sdk: gradio
+sdk_version: 6.30.0
 python_version: "3.12"
 app_file: app.py
+short_description: Experimental aerial flood image segmentation demo
 startup_duration_timeout: 30m
 ---
 
@@ -41,15 +43,21 @@ old. To publish this directory as the Space repository root, from the
 FloodSense checkout run:
 
 ```bash
-git subtree split --prefix=hf_space -b hf-space-deploy
+hf auth login
+hf auth whoami
+hf repos create <username>/<space-name> --type space --space-sdk gradio \
+  --flavor zero-a10g --public
 git remote add hf-space https://huggingface.co/spaces/<username>/<space-name>
-git push hf-space hf-space-deploy:main
+git subtree split --prefix=hf_space -b hf-space-deploy-updated
+git push hf-space hf-space-deploy-updated:main
 ```
 
 If `git remote add` reports that `hf-space` already exists, update it with
 `git remote set-url hf-space https://huggingface.co/spaces/<username>/<space-name>`.
-The Space is public by default; do not add secrets or private data to it.
+The public Space exposes its source code and demo. Do not add secrets, private
+data, or production credentials. Visitors may need their own Hugging Face
+accounts and available ZeroGPU quota to run inference.
 
-The Space requires ZeroGPU-compatible PyTorch. Its separate requirements file
-pins PyTorch 2.8 and torchvision 0.23, without changing the main project's
-dependencies.
+The Space uses the platform-managed Gradio, `spaces`, and PyTorch packages.
+Its separate requirements file includes the ZeroGPU-compatible torchvision
+version without changing the main project's dependencies.

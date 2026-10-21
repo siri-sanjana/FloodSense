@@ -1,8 +1,8 @@
 """Standalone Gradio entry point for the reversible Hugging Face trial."""
 
-import gradio as gr
 import spaces
 import torch
+import gradio as gr
 import torch.nn.functional as functional
 from PIL import Image
 from transformers import AutoImageProcessor, SegformerForSemanticSegmentation
@@ -18,7 +18,8 @@ model.eval()
 
 
 @spaces.GPU(duration=90)
-def analyze_image(image):
+def analyze_image(image: Image.Image | None) -> tuple[Image.Image, dict, str]:
+    """Segment an aerial image and return a color overlay and class summary."""
     if image is None:
         raise gr.Error("Upload an image to run segmentation.")
 
@@ -67,4 +68,4 @@ demo = gr.Interface(
 
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(mcp_server=True)

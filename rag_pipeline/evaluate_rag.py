@@ -70,6 +70,8 @@ def evaluate_retrieval_performance(top_k_values=[1, 3, 5], results_dir="results"
     # Ensure index exists
     store.build_or_update_index()
     
+    if not top_k_values or any(not isinstance(k, int) or k <= 0 for k in top_k_values):
+        raise ValueError("top_k_values must contain positive integers.")
     metrics = {f"Precision@{k}": [] for k in top_k_values}
     metrics.update({f"Recall@{k}": [] for k in top_k_values})
     mrr_list = []
@@ -80,30 +82,31 @@ def evaluate_retrieval_performance(top_k_values=[1, 3, 5], results_dir="results"
         q = item["query"]
         expected_docs = set(item["relevant_docs"])
         expected_keywords = [kw.lower() for kw in item["relevant_keywords"]]
+
+        def is_relevant(chunk):
+            return (
+                chunk["source"] in expected_docs
+                and any(keyword in chunk["text"].lower() for keyword in expected_keywords)
+            )
+
+        relevant_chunk_count = sum(is_relevant(chunk) for chunk in store.fallback_chunks)
         
         max_k = max(top_k_values)
         retrieved = store.query(q, top_k=max_k)
         
-        # Determine relevance of each retrieved item
-        relevance_flags = []
-        for r in retrieved:
-            src = r["source_doc"]
-            content = r["content"].lower()
-            
-            doc_match = src in expected_docs
-            keyword_match = any(kw in content for kw in expected_keywords)
-            
-            is_relevant = doc_match and keyword_match
-            relevance_flags.append(is_relevant)
+        relevance_flags = [
+            r["source_doc"] in expected_docs
+            and any(keyword in r["content"].lower() for keyword in expected_keywords)
+            for r in retrieved
+        ]
             
         # Compute Precision@K and Recall@K
         p_at_k = {}
         r_at_k = {}
         for k in top_k_values:
             k_flags = relevance_flags[:k]
-            precision = sum(k_flags) / k if k > 0 else 0.0
-            # Recall: retrieved relevant / min(total possible relevant in KB, k)
-            recall = 1.0 if any(k_flags) else 0.0
+            precision = sum(k_flags) / k
+            recall = sum(k_flags) / relevant_chunk_count if relevant_chunk_count else 0.0
             
             metrics[f"Precision@{k}"].append(precision)
             metrics[f"Recall@{k}"].append(recall)
@@ -120,12 +123,18 @@ def evaluate_retrieval_performance(top_k_values=[1, 3, 5], results_dir="results"
             "precision": p_at_k,
             "recall": r_at_k,
             "mrr": round(reciprocal_rank, 3),
+            "relevant_chunk_count": relevant_chunk_count,
             "top_retrieved_source": retrieved[0]["source_doc"] if retrieved else "None",
             "top_similarity": retrieved[0]["similarity_score"] if retrieved else 0.0
         })
         
     summary = {
         "benchmark_query_count": len(BENCHMARK_SCENARIOS),
+        "retrieval_backend": store.status()["backend"],
+        "metric_note": (
+            "Relevance is a project-authored source-document plus keyword label, not expert-validated. "
+            "Recall denominators count all knowledge-base chunks matching those labels."
+        ),
         "mean_reciprocal_rank_MRR": float(np.mean(mrr_list)),
         "precision_at_k": {f"Precision@{k}": float(np.mean(metrics[f"Precision@{k}"])) for k in top_k_values},
         "recall_at_k": {f"Recall@{k}": float(np.mean(metrics[f"Recall@{k}"])) for k in top_k_values},

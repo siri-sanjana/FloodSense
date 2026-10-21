@@ -49,13 +49,27 @@ Copy `.env.local.example` to `.env.local`:
 ```bash
 cp .env.local.example .env.local
 ```
-Fill in your Supabase project credentials and backend API URL (`http://localhost:5050`).
+Fill in the Supabase project URL and publishable key from **Project Settings → API**
+and the backend API URL (`http://localhost:5050`). The app also accepts the older
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` variable. Never put a Supabase `service_role`
+secret in a `NEXT_PUBLIC_*` variable or in browser code.
 
 ### 3. Apply Supabase Database Migrations
-Copy and run the contents of [`supabase/migrations/001_initial_schema.sql`](file:///c:/Users/varshitha-home/Downloads/flood%202/flood/frontend/supabase/migrations/001_initial_schema.sql) in your Supabase SQL Editor:
-- Creates `profiles`, `chat_threads`, `chat_messages`, `published_reports` tables.
-- Sets up Row-Level Security (RLS) policies ensuring users only view their own private data.
-- Configures the `flood-imagery` storage bucket for UAV photos.
+In the Supabase SQL Editor, run these files in order:
+
+1. [`supabase/migrations/001_initial_schema.sql`](./supabase/migrations/001_initial_schema.sql)
+2. [`supabase/migrations/002_supabase_app_integration.sql`](./supabase/migrations/002_supabase_app_integration.sql)
+
+The first migration creates the profile, chat, report, and storage schema with
+Row-Level Security. The second adds signup profile creation/backfill, report
+metadata, private per-user image storage policies, and the authenticated report
+upvote function. If the initial schema is already installed, apply only the
+second migration.
+
+In **Authentication → URL Configuration**, allow the app's password-reset
+callback URL, for example `http://localhost:3000/reset-password`; add the
+corresponding production URL before deployment. Set the email confirmation
+redirect URL to the app's sign-in or workspace route as appropriate.
 
 ### 4. Run the Development Server
 Start the Flask backend from the repository root in a separate terminal. Use the project virtual environment so PyTorch and torchvision stay matched:

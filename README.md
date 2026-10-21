@@ -87,10 +87,49 @@ The Flask backend exposes independent model endpoints for an existing client UI:
   Returns a relative-depth visualization URL and inference timing. This is not
   metric distance or flood-water depth.
 - `POST /api/analyze` — legacy combined segmentation, RAG, and SITREP endpoint.
+- `GET /api/rag/status` — lazily initializes the RAG index and reports its backend,
+  indexed chunk count, and source-document metadata.
+- `POST /api/rag/query` — JSON body `{"query":"...","top_k":5}`; returns
+  source/section citations and retrieved passages without invoking the report LLM.
 - `GET /api/overlay/<filename>` — fetch a generated PNG artifact.
 
 Generated inference artifact links are temporary and are held in the server's
 temporary overlay cache.
+
+### RAG knowledge base
+
+The current index ingests the four curated `.txt` files in `knowledge_base/`:
+
+- `ndma_flood_guidelines.txt` — India-focused flood response and infrastructure
+  guidance, with an NDMA/DM Act authority claim in the text.
+- `ndrf_sdrf_sop.txt` — India-focused rescue and evacuation procedures, with an
+  NDRF/SDRF authority claim in the text.
+- `fema_flood_protocols.txt` — despite its filename, its content describes
+  Ministry of Jal Shakti/CWC/State-level guidance; the source identity needs
+  verification and should not be presented as FEMA material.
+- `historical_flood_cases.txt` — curated examples for Chennai, Kerala, Assam,
+  Uttarakhand, and Mumbai floods.
+
+These are repository-provided reference texts, not a verified collection of
+official source publications. Their issuing body, dates, and operational
+thresholds have not been independently checked. No external documents are
+downloaded or silently added. Verify provenance and replace or supplement these
+texts with current, authorized publications before using generated content for
+real incident decisions. Do not treat model similarity scores as confidence.
+
+Synchronize the local index after changing knowledge-base files:
+
+```bash
+python3 -m rag_pipeline.ingest
+```
+
+The default backend attempts Chroma plus Sentence Transformers, falling back to
+local TF-IDF lexical search if those dependencies or model initialization are
+unavailable. Set `USE_TFIDF_RAG=1` to force lexical-only retrieval (also the
+default on Render). Chroma retrieval fuses semantic and lexical rankings; the
+index is reconciled against the current source files on initialization. The
+current evaluator uses hand-authored document/keyword labels and is a smoke
+benchmark, not an expert-validated measure of operational accuracy.
 
 ### Local MCP server
 

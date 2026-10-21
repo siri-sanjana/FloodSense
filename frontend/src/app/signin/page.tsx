@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Eye, EyeOff, ArrowRight, ShieldCheck, AlertCircle } from 'lucide-react';
+import { Eye, EyeOff, ArrowRight, AlertCircle } from 'lucide-react';
 import { FloodSenseLogo } from '../../components/ui/FloodSenseLogo';
 import { api } from '../../lib/api';
 
@@ -29,16 +29,11 @@ export default function SignInPage() {
     try {
       await api.login({ email, password });
       router.push('/app');
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Unable to authenticate. Please check your credentials.');
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Unable to authenticate.');
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleQuickDemo = () => {
-    setEmail('analyst@floodsense.ops');
-    setPassword('DisasterResponse2026!');
   };
 
   return (
@@ -132,16 +127,6 @@ export default function SignInPage() {
             <ArrowRight className="w-4 h-4" />
           </button>
 
-          {/* Quick Demo Credentials */}
-          <div className="pt-2 text-center">
-            <button
-              type="button"
-              onClick={handleQuickDemo}
-              className="text-xs text-cyan-700 hover:text-cyan-800 font-sans hover:underline"
-            >
-              Autofill Demo Credentials
-            </button>
-          </div>
         </form>
 
         {/* Footer Navigation */}

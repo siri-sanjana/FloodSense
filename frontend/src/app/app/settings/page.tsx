@@ -49,8 +49,17 @@ export default function SettingsPage() {
           name: user.name,
           email: user.email,
           role: (user.role as any) || prev.role,
+          region: user.region || prev.region,
+          prefs: {
+            ...prev.prefs,
+            unit: user.prefs?.unit || prev.prefs.unit,
+            tone: user.prefs?.tone || prev.prefs.tone,
+            daylight_mode: user.prefs?.daylight_mode ?? prev.prefs.daylight_mode,
+          },
         }));
       }
+    }).catch((error: unknown) => {
+      setPasswordNotice(error instanceof Error ? error.message : 'Could not load your Supabase profile.');
     });
   }, []);
 
@@ -71,25 +80,32 @@ export default function SettingsPage() {
       document.documentElement.classList.add('light');
     }
 
-    api.updatePreferences({ theme: newTheme });
+    void api.updatePreferences({ theme: newTheme }).catch((error: unknown) => {
+      setPasswordNotice(error instanceof Error ? error.message : 'Could not save theme preference.');
+    });
   };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    await api.updatePreferences({
-      displayName: profile.name,
-      role: profile.role,
-      region: profile.region,
-      unit: profile.prefs.unit,
-      tone: profile.prefs.tone,
-    });
+    try {
+      await api.updatePreferences({
+        displayName: profile.name,
+        role: profile.role,
+        region: profile.region,
+        unit: profile.prefs.unit,
+        tone: profile.prefs.tone,
+      });
 
-    setSaveMessage('Profile configurations saved successfully');
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+      setSaveMessage('Profile configurations saved successfully');
+      setSaved(true);
+      setPasswordNotice(null);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (error) {
+      setPasswordNotice(error instanceof Error ? error.message : 'Could not save profile settings.');
+    }
   };
 
-  const handlePasswordUpdate = (e: React.FormEvent) => {
+  const handlePasswordUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordNotice(null);
     if (!currentPassword) {
@@ -105,28 +121,40 @@ export default function SettingsPage() {
       return;
     }
 
-    setPasswordNotice('Password updated successfully.');
-    setCurrentPassword('');
-    setNewPassword('');
-    setConfirmPassword('');
-    setTimeout(() => setPasswordNotice(null), 3000);
+    try {
+      await api.updatePassword(newPassword, currentPassword);
+      setPasswordNotice('Password updated successfully.');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setTimeout(() => setPasswordNotice(null), 3000);
+    } catch (error) {
+      setPasswordNotice(error instanceof Error ? error.message : 'Could not update password.');
+    }
   };
 
-  const handlePurgeHistory = () => {
+  const handlePurgeHistory = async () => {
     if (
       confirm(
-        'Are you sure you wish to permanently purge all local flood inspection history, chat turns, and cached imagery? This action cannot be reversed.'
+        'Are you sure you wish to permanently delete all saved flood inspection history, chat turns, reports, and uploaded imagery? This action cannot be reversed.'
       )
     ) {
-      localStorage.removeItem('floodsense_threads');
-      alert('All local inspection records have been permanently purged.');
-      router.push('/app');
+      try {
+        await api.deleteAllChats();
+        router.push('/app');
+      } catch (error) {
+        setPasswordNotice(error instanceof Error ? error.message : 'Could not delete your saved conversations.');
+      }
     }
   };
 
   const handleSignOut = async () => {
-    await api.logout();
-    router.push('/signin');
+    try {
+      await api.logout();
+      router.push('/signin');
+    } catch (error) {
+      setPasswordNotice(error instanceof Error ? error.message : 'Could not sign out.');
+    }
   };
 
   return (
@@ -432,7 +460,7 @@ export default function SettingsPage() {
           </div>
           <div className="flex items-center justify-between text-[11px]">
             <span className="text-slate-500">Storage Synchronization:</span>
-            <span className="text-slate-700">Local Browser Storage &bull; Resilient Cache</span>
+            <span className="text-slate-700">Supabase Database &amp; Private Storage</span>
           </div>
         </div>
 
@@ -452,10 +480,10 @@ export default function SettingsPage() {
       <div className="border border-red-200 bg-red-50/50 rounded-xl p-6 space-y-3">
         <div className="text-red-700 font-semibold flex items-center space-x-2 text-sm font-sans">
           <Trash2 className="w-4 h-4" />
-          <span>Data Privacy &amp; Local History Purge</span>
+          <span>Data Privacy &amp; Cloud History Purge</span>
         </div>
         <p className="font-sans text-xs text-slate-600 leading-relaxed">
-          Permanently remove all local inspection conversations and cached UAV imagery from this browser.
+          Permanently remove your saved inspection conversations, reports, and uploaded UAV imagery from Supabase.
         </p>
         <button
           type="button"
@@ -463,7 +491,7 @@ export default function SettingsPage() {
           className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg text-xs transition-colors flex items-center space-x-2 font-sans shadow-xs"
         >
           <Trash2 className="w-3.5 h-3.5" />
-          <span>Purge All Local Records</span>
+          <span>Delete All Cloud Records</span>
         </button>
       </div>
     </div>

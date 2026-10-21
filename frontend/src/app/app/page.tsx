@@ -25,6 +25,7 @@ export default function AppWelcomePage() {
 
   const [question, setQuestion] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -39,7 +40,7 @@ export default function AppWelcomePage() {
 
   const SAMPLE_INCIDENTS = [
     {
-      id: 't-kochi-01',
+      id: '10169',
       title: 'Pass 10169: Kochi Residential Inundation',
       location: 'Periyar River Basin, Kerala',
       image: '/samples/10169.jpg',
@@ -47,7 +48,7 @@ export default function AppWelcomePage() {
       buildings: 16,
     },
     {
-      id: 't-cuttack-02',
+      id: '10815',
       title: 'Pass 10815: Cuttack Canal Breach',
       location: 'Mahanadi Basin Embankment, Odisha',
       image: '/samples/10815.jpg',
@@ -55,7 +56,7 @@ export default function AppWelcomePage() {
       buildings: 21,
     },
     {
-      id: 't-brahma-03',
+      id: '6423',
       title: 'Pass 6423: Brahmaputra Riverine Causeway',
       location: 'Assam Lowland Bridge Axis',
       image: '/samples/6423.jpg',
@@ -63,6 +64,22 @@ export default function AppWelcomePage() {
       buildings: 9,
     },
   ];
+
+  const handleOpenSample = async (sample: (typeof SAMPLE_INCIDENTS)[number]) => {
+    setIsSubmitting(true);
+    setErrorMsg(null);
+    try {
+      const thread = await api.createChat({
+        title: sample.title,
+        location_tag: sample.location,
+        severity: sample.severity === 'CRITICAL' ? 'CRITICAL' : 'MODERATE',
+      });
+      router.push(`/app/chat/${thread.id}?sample_id=${sample.id}`);
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : 'Could not create a sample assessment.');
+      setIsSubmitting(false);
+    }
+  };
 
   const handleFile = (file: File) => {
     setErrorMsg(null);
@@ -78,6 +95,7 @@ export default function AppWelcomePage() {
 
     const previewUrl = URL.createObjectURL(file);
     setSelectedImage(previewUrl);
+    setSelectedFile(file);
     setSelectedFileName(file.name);
   };
 
@@ -97,17 +115,38 @@ export default function AppWelcomePage() {
     }
 
     setIsSubmitting(true);
+    let createdThreadId: string | null = null;
     try {
-      const newId = `t-${Date.now().toString().slice(-4)}`;
-      await api.createChat({
+      const thread = await api.createChat({
         title: question.trim() ? question.slice(0, 32) : 'New UAV Assessment',
         location_tag: 'Sector Aerial Pass',
         severity: 'MODERATE',
       });
+      createdThreadId = thread.id;
+      await api.saveChatMessage({
+        id: `draft-${crypto.randomUUID()}`,
+        thread_id: thread.id,
+        role: 'user',
+        content: question.trim() || 'Analyze this uploaded flood image.',
+        raw_image_url: selectedImage || undefined,
+        image_file: selectedFile || undefined,
+        created_at: new Date().toISOString(),
+      });
 
-      router.push(`/app/chat/${newId}`);
-    } catch {
-      router.push(`/app/chat/t-kochi-01`);
+      router.push(`/app/chat/${thread.id}`);
+    } catch (error) {
+      let message = error instanceof Error ? error.message : 'Could not create a Supabase conversation.';
+      if (createdThreadId) {
+        try {
+          await api.deleteChat(createdThreadId);
+        } catch (cleanupError) {
+          const cleanupMessage =
+            cleanupError instanceof Error ? cleanupError.message : 'conversation cleanup failed';
+          message = `${message} Also, ${cleanupMessage}`;
+        }
+      }
+      setErrorMsg(message);
+      setIsSubmitting(false);
     }
   };
 
@@ -159,6 +198,7 @@ export default function AppWelcomePage() {
                   type="button"
                   onClick={() => {
                     setSelectedImage(null);
+                    setSelectedFile(null);
                     setSelectedFileName(null);
                   }}
                   className="absolute -top-2 -right-2 p-1 bg-red-600 hover:bg-red-700 text-white rounded-full shadow-xs"
@@ -283,10 +323,12 @@ export default function AppWelcomePage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {SAMPLE_INCIDENTS.map((inc) => (
-              <Link
+              <button
                 key={inc.id}
-                href={`/app/chat/${inc.id}`}
-                className="group p-3 bg-white border border-slate-200 hover:border-cyan-500 rounded-xl space-y-2 transition-all block shadow-xs"
+                type="button"
+                onClick={() => void handleOpenSample(inc)}
+                disabled={isSubmitting}
+                className="group w-full text-left p-3 bg-white border border-slate-200 hover:border-cyan-500 rounded-xl space-y-2 transition-all block shadow-xs disabled:opacity-60"
               >
                 <div className="aspect-video w-full rounded-lg overflow-hidden relative bg-slate-100 border border-slate-100">
                   <img
@@ -314,7 +356,7 @@ export default function AppWelcomePage() {
                     {inc.location} &bull; {inc.buildings} buildings
                   </div>
                 </div>
-              </Link>
+              </button>
             ))}
           </div>
         </div>

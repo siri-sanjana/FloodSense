@@ -59,6 +59,7 @@ export interface ChatMessage {
   content: string;
   created_at: string;
   raw_image_url?: string;
+  raw_image_storage_path?: string;
   mask_image_url?: string;
   image_file?: File;
   damage_stats?: DamageStats;

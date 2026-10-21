@@ -17,6 +17,7 @@ export default function SignUpPage() {
   const [agreedTerms, setAgreedTerms] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,10 +45,14 @@ export default function SignUpPage() {
 
     setLoading(true);
     try {
-      await api.signup({ name, email, password });
-      router.push('/app');
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Unable to create account. Please try again.');
+      const result = await api.signup({ name, email, password });
+      if (result.requiresEmailConfirmation) {
+        setSuccessMessage('Check your email to confirm your account, then sign in.');
+      } else {
+        router.push('/app');
+      }
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Unable to create account.');
     } finally {
       setLoading(false);
     }
@@ -70,6 +75,11 @@ export default function SignUpPage() {
           <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs flex items-start space-x-2">
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
             <span>{errorMessage}</span>
+          </div>
+        )}
+        {successMessage && (
+          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 text-xs">
+            {successMessage}
           </div>
         )}
 

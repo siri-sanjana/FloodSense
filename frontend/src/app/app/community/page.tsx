@@ -1,18 +1,31 @@
 'use client';
 
-import React, { useState } from 'react';
-import Link from 'next/link';
-import { Users, ThumbsUp, MapPin, ArrowUpRight, Filter } from 'lucide-react';
-import { COMMUNITY_FEED } from '../../../lib/mock-data';
+import React, { useEffect, useState } from 'react';
+import { ThumbsUp, MapPin } from 'lucide-react';
+import { api } from '../../../lib/api';
+import type { PublishedReport } from '../../../lib/types';
 
 export default function CommunityPage() {
-  const [feed, setFeed] = useState(COMMUNITY_FEED);
+  const [feed, setFeed] = useState<PublishedReport[]>([]);
   const [selectedRegion, setSelectedRegion] = useState('ALL');
+  const [error, setError] = useState<string | null>(null);
 
-  const handleUpvote = (id: string) => {
-    setFeed(prev =>
-      prev.map(item => item.id === id ? { ...item, upvotes: item.upvotes + 1 } : item)
-    );
+  useEffect(() => {
+    api.getPublishedReports()
+      .then(setFeed)
+      .catch((loadError: unknown) => {
+        setError(loadError instanceof Error ? loadError.message : 'Could not load public reports.');
+      });
+  }, []);
+
+  const handleUpvote = async (id: string) => {
+    try {
+      const upvotes = await api.upvotePublishedReport(id);
+      setFeed((previous) => previous.map((item) => item.id === id ? { ...item, upvotes } : item));
+      setError(null);
+    } catch (upvoteError) {
+      setError(upvoteError instanceof Error ? upvoteError.message : 'Could not upvote this report.');
+    }
   };
 
   return (
@@ -48,6 +61,8 @@ export default function CommunityPage() {
         </div>
       </div>
 
+      {error && <p role="alert" className="border border-red-800 bg-red-950 p-3 text-red-200">{error}</p>}
+
       <div className="space-y-6">
         {feed
           .filter(item => selectedRegion === 'ALL' || item.location.includes(selectedRegion))
@@ -63,7 +78,7 @@ export default function CommunityPage() {
                     <span>&bull;</span>
                     <span className="capitalize">Role: {report.author_role}</span>
                     <span>&bull;</span>
-                    <span>{report.created_at}</span>
+                    <span>{new Date(report.created_at).toLocaleString()}</span>
                   </div>
                   <h2 className="font-serif text-2xl text-silt-100">
                     {report.title}
@@ -99,16 +114,15 @@ export default function CommunityPage() {
 
               <div className="pt-3 hairline-t border-abyss-800 flex items-center justify-between text-[11px] text-silt-500">
                 <span>Verified with 10-Class SegFormer &amp; NDMA Guidelines</span>
-                <Link
-                  href="/app/chat/t-kochi-01"
-                  className="flex items-center space-x-1 text-silt-300 hover:text-[#D9822B] transition-colors"
-                >
-                  <span>Inspect Full Telemetry &amp; Citations</span>
-                  <ArrowUpRight className="w-3 h-3" />
-                </Link>
+                <span>Community report &bull; published by an operator</span>
               </div>
             </div>
           ))}
+        {feed.length === 0 && !error && (
+          <p className="py-12 text-center text-silt-400">
+            No published reports yet.
+          </p>
+        )}
       </div>
     </div>
   );

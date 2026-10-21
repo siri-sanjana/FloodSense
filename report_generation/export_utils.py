@@ -54,7 +54,7 @@ def generate_docx_report(report_data: dict, output_path: str) -> str:
     
     # Header Banner
     title_p = doc.add_paragraph()
-    title_run = title_p.add_run("FLOODSENSE OFFICIAL DISASTER SITUATION REPORT")
+    title_run = title_p.add_run("FLOODSENSE IMAGE-ASSESSMENT REPORT")
     title_run.font.name = 'Times New Roman'
     title_run.font.size = Pt(20)
     title_run.font.bold = True
@@ -115,7 +115,7 @@ def generate_docx_report(report_data: dict, output_path: str) -> str:
     p_triage.paragraph_format.space_after = Pt(12)
     
     # Section 2: Damage Assessment Metrics Table
-    h2 = doc.add_heading("2. Computer Vision Damage Assessment (Ground-Truth Verified)", level=1)
+    h2 = doc.add_heading("2. Computer Vision Estimates (Not Ground-Truth Verified)", level=1)
     h2.runs[0].font.color.rgb = RGBColor(0x1E, 0x3A, 0x8A)
     
     dmg = rep.get("damage_assessment", {})
@@ -300,7 +300,7 @@ def generate_pdf_report(report_data: dict, output_path: str) -> str:
     elements = []
     
     # Title & Subtitle
-    elements.append(Paragraph("FLOODSENSE OFFICIAL DISASTER SITUATION REPORT", style_title))
+    elements.append(Paragraph("FLOODSENSE IMAGE-ASSESSMENT REPORT", style_title))
     elements.append(Paragraph("AUTOMATED MULTIMODAL DISASTER DISPATCH & INCIDENT TRIAGE (SITREP)", style_subtitle))
     elements.append(HRFlowable(width="100%", thickness=1.5, color=c_navy, spaceAfter=10))
     
@@ -339,7 +339,7 @@ def generate_pdf_report(report_data: dict, output_path: str) -> str:
     elements.append(Paragraph(triage_txt, style_body))
     
     # 2. Damage Assessment Table
-    elements.append(Paragraph("2. Computer Vision Damage Assessment (Ground-Truth Verified)", style_h1))
+    elements.append(Paragraph("2. Computer Vision Estimates (Not Ground-Truth Verified)", style_h1))
     dmg = rep.get("damage_assessment", {})
     dmg_rows = [
         [Paragraph("<b>QUANTITATIVE METRIC</b>", style_table_hdr), Paragraph("<b>VERIFIED VALUE</b>", style_table_hdr)],

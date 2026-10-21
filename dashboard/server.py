@@ -29,6 +29,7 @@ import time
 import base64
 import tempfile
 import io
+import re
 
 # The inference stack is PyTorch-based; avoid importing optional TensorFlow plugins.
 os.environ.setdefault("USE_TF", "0")
@@ -84,11 +85,8 @@ def get_rag_components():
         from report_generation.llm_engine import FloodLLMEngine
 
         vector_store = DisasterProtocolVectorStore()
-        try:
-            if vector_store.collection and vector_store.collection.count() == 0:
-                vector_store.build_or_update_index()
-        except Exception as e:
-            print(f"[RAG Init Notice] {e}")
+        indexed_chunks = vector_store.build_or_update_index()
+        print(f"[RAG Init] Indexed {indexed_chunks} chunks from the current knowledge base.")
         retriever = FloodProtocolRetriever(vector_store=vector_store)
         llm_engine = FloodLLMEngine()
     return vector_store, retriever, llm_engine
@@ -491,13 +489,57 @@ def api_knowledge_base():
             path = os.path.join(kb_dir, f)
             with open(path, "r", encoding="utf-8") as file:
                 content = file.read()
+            first_line = next((line.strip().lstrip("# ").strip() for line in content.splitlines() if line.strip()), f)
+            document_id_match = re.search(r"^Document ID:\s*(.+)$", content, re.IGNORECASE | re.MULTILINE)
+            authority_match = re.search(r"^Authority:\s*(.+)$", content, re.IGNORECASE | re.MULTILINE)
             docs.append({
                 "filename": f,
-                "title": f.replace("_", " ").replace(".txt", "").upper(),
+                "title": first_line,
+                "document_id": document_id_match.group(1).strip() if document_id_match else os.path.splitext(f)[0],
+                "authority": authority_match.group(1).strip() if authority_match else "Unspecified",
+                "provenance_verified": False,
                 "preview": content[:300] + "...",
                 "full_text": content
             })
     return jsonify({"documents": docs})
+
+@app.route("/api/rag/status", methods=["GET"])
+def api_rag_status():
+    try:
+        store, _, _ = get_rag_components()
+        return jsonify({
+            "status": "ready",
+            "retrieval": "hybrid lexical/vector with reciprocal-rank fusion"
+            if store.collection is not None else "TF-IDF lexical fallback",
+            "index": store.status(),
+        })
+    except Exception as error:
+        print(f"[RAG Status Error] {error}")
+        return jsonify({"status": "error", "error": str(error)}), 503
+
+@app.route("/api/rag/query", methods=["POST"])
+def api_rag_query():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"status": "error", "error": "Provide a JSON object with a query string."}), 400
+    query_text = payload.get("query")
+    top_k = payload.get("top_k", 5)
+    if not isinstance(query_text, str) or not query_text.strip() or len(query_text) > 2000:
+        return jsonify({"status": "error", "error": "query must contain 1 to 2000 characters."}), 400
+    if not isinstance(top_k, int) or isinstance(top_k, bool) or not 1 <= top_k <= 8:
+        return jsonify({"status": "error", "error": "top_k must be an integer from 1 to 8."}), 400
+    try:
+        _, retriever_comp, _ = get_rag_components()
+        results = retriever_comp.retrieve_query(query_text.strip(), top_k=top_k)
+        return jsonify({
+            "status": "success",
+            "query": query_text.strip(),
+            "results": results,
+            "note": "Similarity and retrieval scores are ranking signals, not calibrated confidence.",
+        })
+    except Exception as error:
+        print(f"[RAG Query Error] {error}")
+        return jsonify({"status": "error", "error": str(error)}), 503
 
 @app.route("/api/overlay/<filename>", methods=["GET"])
 def api_get_overlay(filename):
@@ -823,27 +865,13 @@ def api_analyze():
         # ── Step 4: RAG Retrieval from ChromaDB / TF-IDF ──
         rag_t0 = time.time()
         retrieved_protocols = []
+        rag_error = None
         try:
             _, retriever_comp, llm_engine_comp = get_rag_components()
             retrieved_protocols = retriever_comp.retrieve_grounded_protocols(damage_metrics)
         except Exception as rag_err:
-            print(f"[RAG Retrieval Notice] Retrieval fallback engaged ({rag_err})")
-            retrieved_protocols = [
-                {
-                    "citation_tag": "[NDMA-GUIDELINES-FLOOD-2024:SECTION-1.0]",
-                    "source_doc": "NDMA_FLOOD_GUIDELINES.txt",
-                    "section": "SECTION-1.0",
-                    "similarity_score": 0.95,
-                    "content": "National Disaster Management Authority Flood Guidelines: Incident Command Post mobilization and emergency evacuation protocols."
-                },
-                {
-                    "citation_tag": "[NDRF-SOP-WATER-RESCUE-2024:SECTION-1.0]",
-                    "source_doc": "NDRF_SDRF_SOP.txt",
-                    "section": "SECTION-1.0",
-                    "similarity_score": 0.92,
-                    "content": "NDRF Standard Operating Procedure: Inflatable rescue boat deployment and swift water rescue operations."
-                }
-            ]
+            rag_error = str(rag_err)
+            print(f"[RAG Retrieval Error] No source material was substituted: {rag_error}")
         rag_ms = round((time.time() - rag_t0) * 1000, 1)
 
         # ── Step 5: LLM Grounded Report Synthesis ──
@@ -911,14 +939,18 @@ def api_analyze():
             "damage_metrics": damage_metrics,
             "retrieved_protocols": [
                 {
-                    "citation_tag": p.get("citation_tag", "[NDMA-GUIDELINES:SECTION-1.0]"),
-                    "source_doc": p.get("source_doc", "NDMA_FLOOD_GUIDELINES.txt"),
-                    "section": p.get("section", "SECTION-1.0"),
-                    "similarity_score": p.get("similarity_score", 0.90),
+                    "citation_tag": p.get("citation_tag"),
+                    "source_doc": p.get("source_doc"),
+                    "section": p.get("section"),
+                    "similarity_score": p.get("similarity_score"),
+                    "retrieval_score": p.get("retrieval_score"),
+                    "authority": p.get("authority"),
                     "snippet": (p.get("content") or p.get("snippet") or "")[:200] + "..."
                 }
                 for p in retrieved_protocols[:4]
             ],
+            "rag_status": "error" if rag_error else ("retrieved" if retrieved_protocols else "no_matches"),
+            "rag_error": rag_error,
             "sitrep_report": report_data.get("incident_report", {}),
             "markdown_report": report_data.get("markdown_rendered", "")
         }
@@ -954,7 +986,7 @@ def api_export_pdf():
         return send_file(
             pdf_path,
             as_attachment=True,
-            download_name="FloodSense_Official_SITREP_Report.pdf",
+            download_name="FloodSense_Image_Assessment_Report.pdf",
             mimetype="application/pdf"
         )
     except Exception as e:
@@ -978,7 +1010,7 @@ def api_export_docx():
         return send_file(
             docx_path,
             as_attachment=True,
-            download_name="FloodSense_Official_SITREP_Report.docx",
+            download_name="FloodSense_Image_Assessment_Report.docx",
             mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
     except Exception as e:

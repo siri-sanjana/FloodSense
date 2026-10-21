@@ -1,15 +1,26 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { MapPin, Grid, Map, Filter, Calendar, Layers, ArrowUpRight } from 'lucide-react';
-import { GALLERY_ITEMS } from '../../../lib/mock-data';
+import { api } from '../../../lib/api';
+import type { GalleryItem } from '../../../lib/api';
 
 export default function GalleryPage() {
   const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
   const [severityFilter, setSeverityFilter] = useState<string>('ALL');
+  const [items, setItems] = useState<GalleryItem[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
-  const filteredItems = GALLERY_ITEMS.filter(item =>
+  useEffect(() => {
+    api.getGalleryItems()
+      .then(setItems)
+      .catch((loadError: unknown) => {
+        setError(loadError instanceof Error ? loadError.message : 'Could not load saved imagery.');
+      });
+  }, []);
+
+  const filteredItems = items.filter(item =>
     severityFilter === 'ALL' ? true : item.severity_level === severityFilter
   );
 
@@ -72,13 +83,15 @@ export default function GalleryPage() {
         </div>
       </div>
 
+      {error && <p role="alert" className="border border-red-800 bg-red-950 p-3 text-red-200">{error}</p>}
+
       {/* Grid View */}
       {viewMode === 'grid' && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredItems.map((item) => (
             <Link
               key={item.id}
-              href="/app/chat/t-kochi-01"
+              href={`/app/chat/${item.thread_id}`}
               className="group bg-abyss-950 hairline-all border-abyss-800 hover:border-abyss-600 transition-all flex flex-col overflow-hidden"
             >
               {/* Image preview with severity badge */}
@@ -116,6 +129,11 @@ export default function GalleryPage() {
               </div>
             </Link>
           ))}
+          {filteredItems.length === 0 && !error && (
+            <p className="col-span-full py-12 text-center text-silt-400">
+              No saved imagery yet. Run an assessment to add it to your gallery.
+            </p>
+          )}
         </div>
       )}
 
@@ -123,33 +141,14 @@ export default function GalleryPage() {
       {viewMode === 'map' && (
         <div className="bg-abyss-900 hairline-all border-abyss-700 p-8 space-y-6">
           <div className="flex items-center justify-between font-mono text-xs">
-            <span className="text-silt-300">Geospatial Distribution Grid (WGS84)</span>
-            <span className="text-silt-500">4 Monitored Sectors</span>
+            <span className="text-silt-300">Assessment Locations</span>
+            <span className="text-silt-500">Coordinates are not stored</span>
           </div>
 
           <div className="w-full h-96 bg-abyss-950 hairline-all border-abyss-800 relative flex items-center justify-center p-6 overflow-hidden">
-            {/* Minimal coordinate grid lines */}
-            <div className="absolute inset-0 opacity-10 pointer-events-none grid grid-cols-6 grid-rows-4 divide-x divide-y divide-silt-200" />
-
-            {/* Simulated spatial pins */}
-            {filteredItems.map((item, idx) => (
-              <div
-                key={item.id}
-                className="absolute flex flex-col items-center group cursor-pointer"
-                style={{
-                  left: `${20 + idx * 22}%`,
-                  top: `${30 + (idx % 2) * 30}%`,
-                }}
-              >
-                <div className="w-3.5 h-3.5 rounded-full bg-[#D9822B] animate-pulse" />
-                <div className="mt-1 px-2 py-1 bg-abyss-900 hairline-all border-abyss-700 text-[10px] text-silt-200 whitespace-nowrap shadow-md">
-                  {item.title.split(' ')[0]} &mdash; {item.severity_level}
-                </div>
-              </div>
-            ))}
-
-            <div className="absolute bottom-3 left-3 text-[10px] font-mono text-silt-500">
-              Coverage: Southern Riverine Corridors &bull; Live Telemetry Feed
+            <div className="max-w-md text-center text-xs text-silt-400">
+              Location coordinates are not part of the current database schema, so
+              assessments cannot be plotted accurately yet.
             </div>
           </div>
         </div>

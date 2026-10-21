@@ -3,11 +3,12 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, Plus, Image as ImageIcon, BookOpen, Download, SunMoon, Shield } from 'lucide-react';
-import { INITIAL_THREADS } from '../lib/mock-data';
+import type { ChatThread } from '../lib/api';
 
 interface CommandPaletteProps {
   isOpen: boolean;
   onClose: () => void;
+  threads: ChatThread[];
   onNewInspection?: () => void;
   onExportPDF?: () => void;
 }
@@ -15,6 +16,7 @@ interface CommandPaletteProps {
 export const CommandPalette: React.FC<CommandPaletteProps> = ({
   isOpen,
   onClose,
+  threads,
   onNewInspection,
   onExportPDF,
 }) => {
@@ -35,7 +37,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
   if (!isOpen) return null;
 
-  const filteredThreads = INITIAL_THREADS.filter(t =>
+  const filteredThreads = threads.filter(t =>
     t.title.toLowerCase().includes(query.toLowerCase()) ||
     t.location_tag?.toLowerCase().includes(query.toLowerCase())
   );

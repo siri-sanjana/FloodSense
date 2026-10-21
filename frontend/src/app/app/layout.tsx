@@ -23,9 +23,10 @@ import {
 import { CommandPalette } from '../../components/CommandPalette';
 import { CitationDrawer } from '../../components/CitationDrawer';
 import { FloodSenseLogo } from '../../components/ui/FloodSenseLogo';
-import { INITIAL_THREADS, CURRENT_USER } from '../../lib/mock-data';
+import { CURRENT_USER } from '../../lib/mock-data';
 import { CitationClause } from '../../lib/types';
 import { api } from '../../lib/api';
+import type { ChatThread } from '../../lib/api';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -37,10 +38,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [activeCitation, setActiveCitation] = useState<CitationClause | null>(null);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [searchQuery, setSearchQuery] = useState('');
-  const [threads, setThreads] = useState(INITIAL_THREADS);
+  const [threads, setThreads] = useState<ChatThread[]>([]);
   const [threadToDelete, setThreadToDelete] = useState<{ id: string; title: string } | null>(null);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [user, setUser] = useState(CURRENT_USER);
+  const [dataError, setDataError] = useState<string | null>(null);
 
   useEffect(() => {
     // Default to clean white/light theme
@@ -55,19 +57,29 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       document.documentElement.classList.add('light');
     }
 
-    api.getCurrentUser().then((u) => {
-      if (u) {
+    const loadWorkspace = async () => {
+      try {
+        const u = await api.getCurrentUser();
+        if (!u) {
+          router.replace('/signin');
+          return;
+        }
         setUser((prev) => ({
           ...prev,
           name: u.name,
           email: u.email,
           role: (u.role as any) || prev.role,
         }));
+        setThreads(await api.getChats());
+        setDataError(null);
+      } catch (error) {
+        setDataError(error instanceof Error ? error.message : 'Could not load your Supabase workspace.');
       }
-    });
+    };
+    void loadWorkspace();
 
     setMobileDrawerOpen(false);
-  }, [pathname]);
+  }, [pathname, router]);
 
   const toggleTheme = () => {
     const nextTheme = theme === 'light' ? 'dark' : 'light';
@@ -82,27 +94,39 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const handleNewChat = () => {
-    const newId = `t-${Date.now().toString().slice(-4)}`;
-    router.push(`/app/chat/${newId}`);
-    setMobileDrawerOpen(false);
+  const handleNewChat = async () => {
+    try {
+      const thread = await api.createChat();
+      setThreads((previous) => [thread, ...previous]);
+      router.push(`/app/chat/${thread.id}`);
+      setMobileDrawerOpen(false);
+      setDataError(null);
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : 'Could not create a conversation.');
+    }
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!threadToDelete) return;
     const deletedId = threadToDelete.id;
-    setThreads((prev) => prev.filter((t) => t.id !== deletedId));
-    api.deleteChat(deletedId);
-    setThreadToDelete(null);
-
-    if (pathname === `/app/chat/${deletedId}`) {
-      router.push('/app');
+    try {
+      await api.deleteChat(deletedId);
+      setThreads((prev) => prev.filter((t) => t.id !== deletedId));
+      setThreadToDelete(null);
+      setDataError(null);
+      if (pathname === `/app/chat/${deletedId}`) router.push('/app');
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : 'Could not delete the conversation.');
     }
   };
 
   const handleSignOut = async () => {
-    await api.logout();
-    router.push('/signin');
+    try {
+      await api.logout();
+      router.push('/signin');
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : 'Could not sign out.');
+    }
   };
 
   const filteredThreads = threads.filter(
@@ -471,6 +495,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-white text-slate-900 flex flex-col">
+      {dataError && (
+        <div role="alert" className="fixed bottom-4 right-4 z-[100] max-w-md rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800 shadow-lg">
+          {dataError}
+        </div>
+      )}
       {/* ─────────────────────────── TOP HEADER ─────────────────────────── */}
       <header className="h-14 w-full bg-white border-b border-slate-200 flex items-center justify-between px-4 z-30 font-mono text-xs select-none shadow-2xs">
         <div className="flex items-center space-x-3">
@@ -600,6 +629,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <CommandPalette
         isOpen={cmdOpen}
         onClose={() => setCmdOpen(false)}
+        threads={threads}
         onNewInspection={handleNewChat}
         onExportPDF={() => window.dispatchEvent(
           new CustomEvent('floodsense:export-sitrep', { detail: { format: 'pdf' } }),

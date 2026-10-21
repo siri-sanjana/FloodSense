@@ -21,8 +21,8 @@ export default function ForgotPasswordPage() {
       const res = await api.forgotPassword(email);
       setMessage(res.message);
       setSubmitted(true);
-    } catch (err: any) {
-      setMessage('Failed to dispatch recovery instructions. Please verify your email.');
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to send password recovery instructions.');
     } finally {
       setLoading(false);
     }

@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect, use } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   UploadCloud,
   Send,
@@ -25,7 +26,6 @@ import { SitrepStream } from '../../../../components/SitrepStream';
 import { DamageTable } from '../../../../components/DamageTable';
 import { CompareSlider } from '../../../../components/CompareSlider';
 import { CitationDrawer } from '../../../../components/CitationDrawer';
-import { INITIAL_THREADS } from '../../../../lib/mock-data';
 import { ChatMessage, CitationClause, DamageStats, RegionContext } from '../../../../lib/types';
 import { api } from '../../../../lib/api';
 import { exportSitrep } from '../../../../lib/sitrep-export';
@@ -97,13 +97,21 @@ function mapDamageStats(metrics: Record<string, any>): DamageStats {
 export default function ChatPage({ params }: ChatPageProps) {
   const resolvedParams = use(params);
   const threadId = resolvedParams.id;
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedSampleId = searchParams.get('sample_id');
 
-  const currentThread = INITIAL_THREADS.find((t) => t.id === threadId) || {
+  const [currentThread, setCurrentThread] = useState<{
+    id: string;
+    title: string;
+    location_tag: string;
+    severity: 'LOW' | 'MODERATE' | 'CRITICAL' | 'CATASTROPHIC';
+  }>({
     id: threadId,
     title: 'Tactical UAV Reconnaissance Pass',
     location_tag: 'Sector Coordinates Unconfirmed',
     severity: 'MODERATE' as const,
-  };
+  });
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
@@ -119,6 +127,9 @@ export default function ChatPage({ params }: ChatPageProps) {
   const [compareMode, setCompareMode] = useState(false);
   const [activeSector, setActiveSector] = useState<'10169' | '10815' | '6423'>('10169');
   const [exportError, setExportError] = useState<string | null>(null);
+  const [publishedMessageIds, setPublishedMessageIds] = useState<Set<string>>(new Set());
+  const [pendingAnalysisMessage, setPendingAnalysisMessage] = useState<ChatMessage | null>(null);
+  const [pendingSampleId, setPendingSampleId] = useState<'10169' | '10815' | '6423' | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
@@ -147,6 +158,76 @@ export default function ChatPage({ params }: ChatPageProps) {
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isProcessing]);
+
+  useEffect(() => {
+    let active = true;
+    const loadThread = async () => {
+      try {
+        const [thread, savedMessages] = await Promise.all([
+          api.getChat(threadId),
+          api.getChatMessages(threadId),
+        ]);
+        if (!active) return;
+        if (!thread) {
+          const created = await api.createChat({
+            title: 'Tactical UAV Reconnaissance Pass',
+            location_tag: 'Sector Coordinates Unconfirmed',
+            severity: 'LOW',
+          });
+          router.replace(`/app/chat/${created.id}`);
+          return;
+        }
+        setCurrentThread({
+          id: thread.id,
+          title: thread.title,
+          location_tag: thread.location_tag || 'Sector Coordinates Unconfirmed',
+          severity: thread.severity || 'LOW',
+        });
+        setMessages(savedMessages);
+        if (
+          savedMessages.length === 0 &&
+          (requestedSampleId === '10169' ||
+            requestedSampleId === '10815' ||
+            requestedSampleId === '6423')
+        ) {
+          setPendingSampleId(requestedSampleId);
+          return;
+        }
+        const lastMessage = savedMessages[savedMessages.length - 1];
+        const lastUserMessage = [...savedMessages]
+          .reverse()
+          .find((message) => message.role === 'user');
+        if (lastUserMessage && lastMessage?.id === lastUserMessage.id) {
+          const sampleMatch = lastUserMessage.raw_image_url?.match(/\/samples\/(10169|10815|6423)\./);
+          if (sampleMatch) setActiveSector(sampleMatch[1] as '10169' | '10815' | '6423');
+
+          if (lastUserMessage.raw_image_storage_path) {
+            const restoredFile = await api.downloadChatImage(lastUserMessage.raw_image_storage_path);
+            if (!active) return;
+            setMessages((previous) =>
+              previous.map((message) =>
+                message.id === lastUserMessage.id
+                  ? { ...message, image_file: restoredFile }
+                  : message,
+              ),
+            );
+            setSelectedFile(restoredFile);
+            setSelectedImage(lastUserMessage.raw_image_url || null);
+            setSelectedFileName(restoredFile.name);
+          }
+          setPendingAnalysisMessage(lastUserMessage);
+        }
+      } catch (error) {
+        if (active) {
+          setValidationError(error instanceof Error ? error.message : 'Could not load this conversation.');
+        }
+      }
+    };
+    void loadThread();
+    return () => {
+      active = false;
+    };
+  }, [threadId, router, requestedSampleId]);
 
   const handleImageFile = (file: File) => {
     setValidationError(null);
@@ -198,23 +279,25 @@ export default function ChatPage({ params }: ChatPageProps) {
     imageFile: File | null = selectedFile,
     sampleId: string = activeSector,
     imagePreview: string | null = selectedImage,
+    existingUserMessage?: ChatMessage,
   ) => {
     const textToSend = customText !== undefined ? customText : inputText;
     if (!textToSend.trim() && !imagePreview) return;
     setValidationError(null);
 
-    const userMsg: ChatMessage = {
-      id: `msg-${Date.now()}`,
-      thread_id: threadId,
-      role: 'user',
-      content: textToSend || 'Initiating automated UAV sensor pass analysis.',
-      raw_image_url: imagePreview || SECTOR_SCENARIOS.find((sector) => sector.id === sampleId)?.image,
-      image_file: imageFile || undefined,
-      region_context: attachedRegion || undefined,
-      created_at: new Date().toISOString(),
-    };
+    const userMsg: ChatMessage = existingUserMessage
+      ? { ...existingUserMessage, image_file: imageFile || undefined }
+      : {
+          id: `msg-${Date.now()}`,
+          thread_id: threadId,
+          role: 'user',
+          content: textToSend || 'Initiating automated UAV sensor pass analysis.',
+          raw_image_url: imagePreview || SECTOR_SCENARIOS.find((sector) => sector.id === sampleId)?.image,
+          image_file: imageFile || undefined,
+          region_context: attachedRegion || undefined,
+          created_at: new Date().toISOString(),
+        };
 
-    setMessages((prev) => [...prev, userMsg]);
     setInputText('');
     setSelectedImage(null);
     setSelectedFile(null);
@@ -223,6 +306,18 @@ export default function ChatPage({ params }: ChatPageProps) {
     setIsProcessing(true);
 
     try {
+      const savedUserMessage = existingUserMessage
+        ? userMsg
+        : await api.saveChatMessage(userMsg);
+      const displayUserMessage = {
+        ...savedUserMessage,
+        image_file: userMsg.image_file,
+      };
+      setMessages((previous) =>
+        existingUserMessage
+          ? previous.map((message) => message.id === userMsg.id ? displayUserMessage : message)
+          : [...previous, displayUserMessage],
+      );
       const analysis = await api.analyze({
         image: imageFile || undefined,
         sample_id: imageFile ? undefined : sampleId,
@@ -241,14 +336,14 @@ export default function ChatPage({ params }: ChatPageProps) {
         thread_id: threadId,
         role: 'assistant',
         content: analysis.markdown_report || 'The backend returned no situation report.',
-        raw_image_url: imagePreview || SECTOR_SCENARIOS.find((sector) => sector.id === sampleId)?.image,
-        image_file: imageFile || undefined,
+        raw_image_url: savedUserMessage.raw_image_storage_path || savedUserMessage.raw_image_url,
         mask_image_url: analysis.overlay_url,
         damage_stats: mapDamageStats(analysis.damage_metrics),
         citations,
         created_at: new Date().toISOString(),
       };
-      setMessages((prev) => [...prev, assistantMsg]);
+      const savedAssistantMessage = await api.saveChatMessage(assistantMsg);
+      setMessages((prev) => [...prev, savedAssistantMessage]);
     } catch (error) {
       setValidationError(
         error instanceof Error ? error.message : 'Backend analysis failed.',
@@ -257,6 +352,29 @@ export default function ChatPage({ params }: ChatPageProps) {
       setIsProcessing(false);
     }
   };
+
+  useEffect(() => {
+    if (!pendingAnalysisMessage) return;
+    if (pendingAnalysisMessage.raw_image_storage_path && !selectedFile) return;
+    const pending = pendingAnalysisMessage;
+    setPendingAnalysisMessage(null);
+    void submitPrompt(
+      pending.content,
+      selectedFile,
+      activeSector,
+      pending.raw_image_url || null,
+      pending,
+    );
+  }, [pendingAnalysisMessage, selectedFile, activeSector]);
+
+  useEffect(() => {
+    if (!pendingSampleId) return;
+    const sample = SECTOR_SCENARIOS.find((sector) => sector.id === pendingSampleId);
+    if (!sample) return;
+    setPendingSampleId(null);
+    setActiveSector(pendingSampleId);
+    void submitPrompt(`Analyze FloodNet sample ${sample.id}: ${sample.name}`, null, sample.id, null);
+  }, [pendingSampleId]);
 
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -267,6 +385,20 @@ export default function ChatPage({ params }: ChatPageProps) {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handlePublishReport = async (message: ChatMessage) => {
+    try {
+      await api.publishReport(
+        message.id,
+        currentThread.title,
+        currentThread.location_tag,
+      );
+      setPublishedMessageIds((previous) => new Set(previous).add(message.id));
+      setValidationError(null);
+    } catch (error) {
+      setValidationError(error instanceof Error ? error.message : 'Could not publish this report.');
+    }
   };
 
   const handleExportReport = async (content: string | undefined, format: 'pdf' | 'docx') => {
@@ -537,6 +669,15 @@ export default function ChatPage({ params }: ChatPageProps) {
                 {/* Action Bar: Copy & Regenerate */}
                 <div className="flex items-center justify-between gap-3 pt-2 font-mono text-[11px] border-t border-slate-100">
                   <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => void handlePublishReport(msg)}
+                      disabled={publishedMessageIds.has(msg.id)}
+                      className="flex items-center space-x-1.5 px-2.5 py-1 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg text-slate-600 transition-colors shadow-2xs disabled:opacity-50"
+                      title="Publish this report to the community feed"
+                    >
+                      <ArrowRight className="w-3.5 h-3.5 text-cyan-700" />
+                      <span>{publishedMessageIds.has(msg.id) ? 'Published' : 'Publish report'}</span>
+                    </button>
                     <button
                       onClick={() => handleCopyMessage(msg.id, msg.content)}
                       className="flex items-center space-x-1.5 px-2.5 py-1 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg text-slate-600 hover:text-slate-900 transition-colors shadow-2xs"

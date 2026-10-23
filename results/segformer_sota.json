@@ -1,0 +1,194 @@
+{
+  "model": "SegFormer-B3 (Fine-tuned on FloodNet)",
+  "epochs_trained": 12,
+  "best_epoch": 6,
+  "best_val_mIoU": 0.4976,
+  "final_val_metrics": {
+    "mIoU": 0.4976,
+    "macro_f1": 0.61,
+    "macro_precision": 0.686,
+    "macro_recall": 0.6344,
+    "frequency_weighted_iou": 0.7427,
+    "overall_pixel_accuracy": 0.8449,
+    "per_class": {
+      "Background": {
+        "class_id": 0,
+        "iou": 0.0199,
+        "f1_score": 0.039,
+        "precision": 0.2794,
+        "recall": 0.0209,
+        "gt_pixel_count": 2589021,
+        "pred_pixel_count": 194101
+      },
+      "Building-Flooded": {
+        "class_id": 1,
+        "iou": 0.3171,
+        "f1_score": 0.4815,
+        "precision": 0.3456,
+        "recall": 0.7936,
+        "gt_pixel_count": 2040629,
+        "pred_pixel_count": 4686254
+      },
+      "Building-Non-Flooded": {
+        "class_id": 2,
+        "iou": 0.7434,
+        "f1_score": 0.8528,
+        "precision": 0.8352,
+        "recall": 0.8712,
+        "gt_pixel_count": 3354214,
+        "pred_pixel_count": 3498749
+      },
+      "Road-Flooded": {
+        "class_id": 3,
+        "iou": 0.0654,
+        "f1_score": 0.1228,
+        "precision": 0.7348,
+        "recall": 0.067,
+        "gt_pixel_count": 3042904,
+        "pred_pixel_count": 277439
+      },
+      "Road-Non-Flooded": {
+        "class_id": 4,
+        "iou": 0.7515,
+        "f1_score": 0.8581,
+        "precision": 0.8238,
+        "recall": 0.8954,
+        "gt_pixel_count": 6935596,
+        "pred_pixel_count": 7538943
+      },
+      "Water": {
+        "class_id": 5,
+        "iou": 0.6442,
+        "f1_score": 0.7836,
+        "precision": 0.7345,
+        "recall": 0.8396,
+        "gt_pixel_count": 13064984,
+        "pred_pixel_count": 14934192
+      },
+      "Tree": {
+        "class_id": 6,
+        "iou": 0.7203,
+        "f1_score": 0.8374,
+        "precision": 0.8029,
+        "recall": 0.875,
+        "gt_pixel_count": 21872572,
+        "pred_pixel_count": 23836550
+      },
+      "Vehicle": {
+        "class_id": 7,
+        "iou": 0.3827,
+        "f1_score": 0.5535,
+        "precision": 0.6376,
+        "recall": 0.489,
+        "gt_pixel_count": 204334,
+        "pred_pixel_count": 156721
+      },
+      "Pool": {
+        "class_id": 8,
+        "iou": 0.4864,
+        "f1_score": 0.6545,
+        "precision": 0.7349,
+        "recall": 0.5899,
+        "gt_pixel_count": 219780,
+        "pred_pixel_count": 176415
+      },
+      "Grass": {
+        "class_id": 9,
+        "iou": 0.8455,
+        "f1_score": 0.9163,
+        "precision": 0.9307,
+        "recall": 0.9023,
+        "gt_pixel_count": 64640766,
+        "pred_pixel_count": 62665436
+      }
+    }
+  },
+  "dataset_pair_count": 848,
+  "split_strategy": "official_train_official_validation",
+  "train_label_policy": "official_labeled_train_ids_only",
+  "train_image_count": 398,
+  "validation_image_count": 450,
+  "skipped_pairs": [],
+  "training_history": {
+    "train_loss": [
+      0.5995,
+      0.37,
+      0.3243,
+      0.2958,
+      0.2807,
+      0.2605,
+      0.2472,
+      0.2333,
+      0.2233,
+      0.214,
+      0.2114,
+      0.2102
+    ],
+    "val_mIoU": [
+      0.0,
+      0.4468,
+      0.4468,
+      0.4691,
+      0.4691,
+      0.4976,
+      0.4976,
+      0.4969,
+      0.4969,
+      0.4963,
+      0.4963,
+      0.4925
+    ],
+    "val_pixel_acc": [
+      0.0,
+      0.8251,
+      0.8251,
+      0.8346,
+      0.8346,
+      0.8449,
+      0.8449,
+      0.844,
+      0.844,
+      0.8458,
+      0.8458,
+      0.8447
+    ],
+    "epoch_times": [
+      418.38,
+      527.02,
+      208.72,
+      293.06,
+      200.63,
+      292.55,
+      205.35,
+      286.17,
+      208.21,
+      286.79,
+      205.12,
+      284.51
+    ]
+  },
+  "config": {
+    "model_name": "nvidia/mit-b3",
+    "dataset_root": "C:\\Users\\varshitha-home\\Desktop\\Flood_AIE\\FloodNet",
+    "img_dir": null,
+    "mask_dir": null,
+    "epochs": 12,
+    "batch_size": 1,
+    "grad_accum_steps": 4,
+    "lr": 6e-05,
+    "init_checkpoint": null,
+    "class_weight_cap": 0.0,
+    "img_size": 512,
+    "val_fraction": 0.2,
+    "seed": 42,
+    "min_delta": 0.001,
+    "early_stopping_patience": 8,
+    "checkpoint_dir": "checkpoints/segformer_sota",
+    "results_file": "results/segformer_sota.json",
+    "save_every": 5,
+    "val_interval": 2,
+    "loss": "lovasz_compound",
+    "lovasz_weight": 0.6,
+    "use_amp": false
+  }
+}

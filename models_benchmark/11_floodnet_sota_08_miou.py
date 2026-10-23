@@ -318,11 +318,101 @@ def build_sota_model(model_name="nvidia/mit-b4", num_labels=10):
     return model
 
 
+def colorize_mask(mask_arr):
+    h, w = mask_arr.shape
+    rgb = np.zeros((h, w, 3), dtype=np.uint8)
+    for cid, color in COLOR_PALETTE.items():
+        rgb[mask_arr == cid] = color
+    return rgb
+
+
+def run_demo(checkpoint_path="checkpoints/segformer_sota/segformer_best.pt", num_samples=2):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    ckpt_file = PROJECT_ROOT / checkpoint_path
+    if not ckpt_file.exists():
+        print(f"[SOTA Pipeline] Checkpoint not found: {ckpt_file}")
+        return
+
+    print(f"\n[SOTA Pipeline] Loading fine-tuned checkpoint: {ckpt_file} on {device}")
+    model = build_sota_model("nvidia/mit-b3", num_labels=10)
+    state_dict = torch.load(ckpt_file, map_location=device)
+    if "model_state_dict" in state_dict:
+        state_dict = state_dict["model_state_dict"]
+    model.load_state_dict(state_dict)
+    model.to(device)
+    model.eval()
+
+    val_img_dir = PROJECT_ROOT / "FloodNet" / "FloodNet-Supervised_v1.0" / "val" / "val-org-img"
+    val_mask_dir = PROJECT_ROOT / "FloodNet" / "ColorMasks-FloodNetv1" / "ColorMasks-ValSet"
+    out_dir = PROJECT_ROOT / "results" / "sota_predictions"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    img_files = sorted(list(val_img_dir.glob("*.jpg")))[:num_samples]
+    if not img_files:
+        print("[SOTA Pipeline] No validation images found.")
+        return
+
+    print(f"[SOTA Pipeline] Generating high-resolution comparisons for {len(img_files)} images...")
+    for idx, img_p in enumerate(img_files):
+        stem = img_p.stem
+        mask_p = val_mask_dir / f"{stem}_lab.png"
+        if not mask_p.exists():
+            mask_p = val_mask_dir / f"{stem}.png"
+
+        orig_img = Image.open(img_p).convert("RGB")
+        orig_np = np.array(orig_img)
+        h, w = orig_np.shape[:2]
+
+        # 1. Standard 512x512 downsampling inference
+        ds_img = orig_img.resize((512, 512), Image.BILINEAR)
+        ds_arr = (np.array(ds_img, dtype=np.float32) / 255.0 - MEAN) / STD
+        ds_tensor = torch.from_numpy(ds_arr).permute(2, 0, 1).float().unsqueeze(0).to(device)
+        with torch.no_grad():
+            ds_out = model(ds_tensor).logits
+            ds_up = F.interpolate(ds_out, size=(h, w), mode="bilinear", align_corners=False)
+            ds_pred = ds_up.argmax(dim=1).squeeze(0).cpu().numpy()
+
+        # 2. Gaussian feathered sliding window inference on high-res (1024x768)
+        hr_w, hr_h = 1024, 768
+        hr_img = orig_img.resize((hr_w, hr_h), Image.BILINEAR)
+        norm_hr = (np.array(hr_img, dtype=np.float32) / 255.0 - MEAN) / STD
+        hr_tensor = torch.from_numpy(norm_hr).permute(2, 0, 1).float()
+        sota_probs = sliding_window_predict(model, hr_tensor, window_size=512, stride=256, device=device)
+        sota_pred_small = sota_probs.argmax(dim=0).cpu().numpy()
+        sota_pred = np.array(Image.fromarray(sota_pred_small.astype(np.uint8)).resize((w, h), Image.NEAREST))
+
+        # Visualizations
+        color_ds = colorize_mask(ds_pred)
+        color_sota = colorize_mask(sota_pred)
+
+        # Build side-by-side comparison: [Original | Ground Truth (if exists) | Standard 512x512 | SOTA High-Res]
+        panels = [orig_img]
+        if mask_p.exists():
+            gt_mask = Image.open(mask_p).convert("RGB")
+            panels.append(gt_mask)
+        panels.append(Image.fromarray(color_ds))
+        panels.append(Image.fromarray(color_sota))
+
+        # Save composite image
+        pw, ph = 400, int(400 * h / w)
+        resized_panels = [p.resize((pw, ph), Image.BILINEAR) for p in panels]
+        composite = Image.new("RGB", (pw * len(panels), ph))
+        for i, p in enumerate(resized_panels):
+            composite.paste(p, (i * pw, 0))
+
+        out_path = out_dir / f"sota_comparison_{stem}.png"
+        composite.save(out_path)
+        print(f"  [{idx+1}/{len(img_files)}] Saved visual comparison to: {out_path}")
+
+    print("\n[SOTA Pipeline] High-resolution evaluation and demonstration complete!")
+
+
 if __name__ == "__main__":
     print("=" * 70)
-    print("FloodSense SOTA Pipeline Components Loaded Successfully.")
+    print("FloodSense SOTA Pipeline Components")
     print("1. LovaszSoftmaxLoss: Direct IoU extension loss active.")
     print("2. CompoundIoULoss: Focal + Lovasz multi-objective active.")
     print("3. SlidingWindowPredict: Gaussian feathered tiling enabled.")
     print("4. PredictWithTTA: Multi-scale + Dihedral TTA enabled.")
     print("=" * 70)
+    run_demo(num_samples=2)

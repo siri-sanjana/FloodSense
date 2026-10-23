@@ -38,7 +38,12 @@ class FloodLLMEngine:
         self.api_key = api_key
         self.provider = provider
 
-    def generate_grounded_report(self, damage_metrics: dict, retrieved_protocols: list) -> dict:
+    def generate_grounded_report(
+        self,
+        damage_metrics: dict,
+        retrieved_protocols: list,
+        user_question: str | None = None,
+    ) -> dict:
         """
         Main interface to generate a grounded disaster report from CV metrics and RAG protocols.
         Prioritizes Groq LLM generation, with automatic fallback to deterministic synthesis on failure.
@@ -48,7 +53,11 @@ class FloodLLMEngine:
         # 1. Attempt Groq LLM generation if enabled and key is available
         if self.provider != "offline" and self.api_key:
             try:
-                report = self._call_groq_api(damage_metrics, retrieved_protocols)
+                report = self._call_groq_api(
+                    damage_metrics,
+                    retrieved_protocols,
+                    user_question=user_question,
+                )
                 if report and "incident_report" in report:
                     report["generation_time_ms"] = round((time.time() - t0) * 1000, 2)
                     report["synthesis_engine"] = "Groq LPU (openai/gpt-oss-120b)"
@@ -57,16 +66,29 @@ class FloodLLMEngine:
                 print(f"[LLM Engine Notice] Groq API call encountered: {e}. Engaging deterministic synthesis fallback...")
 
         # 2. Deterministic Grounded Synthesis Fallback (guarantees zero-hallucination & full citations)
-        report = self._deterministic_grounded_synthesis(damage_metrics, retrieved_protocols)
+        report = self._deterministic_grounded_synthesis(
+            damage_metrics,
+            retrieved_protocols,
+            user_question=user_question,
+        )
         report["generation_time_ms"] = round((time.time() - t0) * 1000, 2)
         report["synthesis_engine"] = "Deterministic Grounded Engine"
         return report
 
-    def _call_groq_api(self, damage_metrics: dict, retrieved_protocols: list) -> dict:
+    def _call_groq_api(
+        self,
+        damage_metrics: dict,
+        retrieved_protocols: list,
+        user_question: str | None = None,
+    ) -> dict:
         """
         Invokes Groq OpenAI-compatible Chat Completions API with structured JSON output.
         """
-        user_prompt = create_user_prompt(damage_metrics, retrieved_protocols)
+        user_prompt = create_user_prompt(
+            damage_metrics,
+            retrieved_protocols,
+            user_question=user_question,
+        )
         endpoint = "https://api.groq.com/openai/v1/chat/completions"
         
         headers = {
@@ -133,7 +155,17 @@ class FloodLLMEngine:
                         inc_rep["confidence_score"] = 0.0
                         inc_rep["confidence_note"] = "No calibrated confidence score is available."
                         self._overwrite_vision_metrics(inc_rep, damage_metrics)
+                        if user_question:
+                            parsed["follow_up_answer"] = str(
+                                parsed.get("follow_up_answer")
+                                or "The available image metrics and retrieved sources do not answer this question."
+                            )
                         markdown = self._render_markdown(inc_rep)
+                        if user_question:
+                            markdown += (
+                                "\n\n## Follow-up question\n"
+                                f"{parsed['follow_up_answer']}"
+                            )
                         parsed["markdown_rendered"] = markdown
                         print(f"[Groq LLM Engine] Successfully generated SITREP using model '{model}'")
                         return parsed
@@ -162,7 +194,12 @@ class FloodLLMEngine:
                 pass
         return {}
 
-    def _deterministic_grounded_synthesis(self, damage_metrics: dict, retrieved_protocols: list) -> dict:
+    def _deterministic_grounded_synthesis(
+        self,
+        damage_metrics: dict,
+        retrieved_protocols: list,
+        user_question: str | None = None,
+    ) -> dict:
         """Create a facts-only report when no remote language model is configured."""
         summary = damage_metrics.get("damage_summary", {})
         buildings = damage_metrics.get("buildings", {})
@@ -217,6 +254,21 @@ class FloodLLMEngine:
         }
         result = {"incident_report": incident_report}
         result["markdown_rendered"] = self._render_markdown(incident_report)
+        if user_question:
+            result["follow_up_answer"] = (
+                "The image-derived estimates for this same image are: "
+                f"{summary.get('total_flood_area_px', 0)} flood-class pixels "
+                f"({summary.get('flood_coverage_pct', 0.0)}% of the image), "
+                f"{buildings.get('flooded_building_count', 0)} flooded-building "
+                "components, and "
+                f"{roads.get('flooded_road_area_px', 0)} flooded-road pixels. "
+                "These predictions cannot establish physical water depth, exact "
+                "object identity, or a safe route."
+            )
+            result["markdown_rendered"] += (
+                "\n\n## Follow-up question\n"
+                f"{result['follow_up_answer']}"
+            )
         return result
 
     @staticmethod

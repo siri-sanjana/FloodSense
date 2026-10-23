@@ -818,6 +818,12 @@ def api_analyze():
     try:
         requested_model = request.form.get("model", "").lower()
         use_recommended = request.form.get("use_recommended", "false").lower() in ("true", "1", "yes")
+        user_question = request.form.get("question", "").strip()
+        if len(user_question) > 2000:
+            return jsonify({
+                "status": "error",
+                "error": "question must contain at most 2000 characters.",
+            }), 400
         
         # Check if sample ID provided or file uploaded
         sample_id = request.form.get("sample_id")
@@ -945,6 +951,18 @@ def api_analyze():
         try:
             _, retriever_comp, llm_engine_comp = get_rag_components()
             retrieved_protocols = retriever_comp.retrieve_grounded_protocols(damage_metrics)
+            if user_question:
+                question_protocols = retriever_comp.retrieve_query(user_question, top_k=4)
+                seen_citations = {
+                    protocol.get("citation_tag")
+                    for protocol in question_protocols
+                    if protocol.get("citation_tag")
+                }
+                retrieved_protocols = question_protocols + [
+                    protocol
+                    for protocol in retrieved_protocols
+                    if protocol.get("citation_tag") not in seen_citations
+                ]
         except Exception as rag_err:
             rag_error = str(rag_err)
             print(f"[RAG Retrieval Error] No source material was substituted: {rag_error}")
@@ -956,12 +974,20 @@ def api_analyze():
         try:
             if llm_engine_comp is None:
                 _, _, llm_engine_comp = get_rag_components()
-            report_data = llm_engine_comp.generate_grounded_report(damage_metrics, retrieved_protocols)
+            report_data = llm_engine_comp.generate_grounded_report(
+                damage_metrics,
+                retrieved_protocols,
+                user_question=user_question or None,
+            )
         except Exception as llm_err:
             print(f"[LLM Engine Notice] Using direct fallback synthesis ({llm_err})")
             from report_generation.llm_engine import FloodLLMEngine
             fallback_engine = FloodLLMEngine(provider="offline")
-            report_data = fallback_engine.generate_grounded_report(damage_metrics, retrieved_protocols)
+            report_data = fallback_engine.generate_grounded_report(
+                damage_metrics,
+                retrieved_protocols,
+                user_question=user_question or None,
+            )
         llm_ms = round((time.time() - llm_t0) * 1000, 1)
 
         # ── Step 6: Generate Pure Color Mask Overlay ──
@@ -1030,6 +1056,7 @@ def api_analyze():
             "rag_status": "error" if rag_error else ("retrieved" if retrieved_protocols else "no_matches"),
             "rag_error": rag_error,
             "sitrep_report": report_data.get("incident_report", {}),
+            "follow_up_answer": report_data.get("follow_up_answer"),
             "markdown_report": report_data.get("markdown_rendered", "")
         }
 

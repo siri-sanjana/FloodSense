@@ -43,8 +43,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [user, setUser] = useState({ ...CURRENT_USER, avatar_url: undefined as string | undefined });
   const [dataError, setDataError] = useState<string | null>(null);
+  const [isGuest, setIsGuest] = useState(false);
 
   useEffect(() => {
+    setIsGuest(api.isGuestMode());
     localStorage.removeItem('floodsense_theme');
     document.documentElement.classList.remove('dark');
     document.documentElement.classList.add('light');
@@ -488,6 +490,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
         </div>
       </header>
+      {isGuest && (
+        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-[11px] font-mono text-amber-900">
+          Guest demo session — conversations are temporary and account settings are unavailable.
+        </div>
+      )}
 
       {/* ─────────────────────────── MAIN WRAPPER ─────────────────────────── */}
       <div className="flex-1 flex overflow-hidden relative">

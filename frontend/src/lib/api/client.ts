@@ -69,11 +69,30 @@ export interface SegmentResponse {
   mask_encoding: { class_mask: string; binary_mask: string };
   class_mapping: Record<string, string>;
   timings: { inference_ms: number };
-  damage_metrics: Record<string, any>;
+  damage_metrics: DamageMetrics;
   class_mask_url: string;
   binary_mask_url: string;
   overlay_url: string;
   error?: string;
+}
+
+export interface DamageMetrics {
+  damage_summary?: {
+    damage_severity_score?: number;
+    severity_label?: string;
+    total_flood_area_px?: number;
+    flood_coverage_pct?: number;
+  };
+  buildings?: {
+    flooded_building_count?: number;
+    non_flooded_building_count?: number;
+    total_building_count?: number;
+  };
+  roads?: {
+    flooded_road_coverage_pct?: number;
+  };
+  class_pixel_counts?: Record<string, number>;
+  class_pixel_distribution_pct?: Record<string, number>;
 }
 
 export interface DepthParams {
@@ -99,6 +118,7 @@ export interface AnalyzeParams {
   sample_id?: string;
   model?: string;
   use_recommended?: boolean;
+  question?: string;
 }
 
 export interface AnalyzeResponse {
@@ -113,7 +133,8 @@ export interface AnalyzeResponse {
   depth_error?: string;
   depth_url?: string | null;
   depth_model?: string | null;
-  damage_metrics: any;
+  damage_metrics: DamageMetrics;
+  follow_up_answer?: string;
   retrieved_protocols: Array<{
     citation_tag: string;
     source_doc: string;
@@ -196,6 +217,11 @@ interface MessageRow {
   created_at: string;
 }
 
+const GUEST_MODE_KEY = 'floodsense_guest_mode';
+const API_TIMEOUT_MS = 45000;
+const guestThreads = new Map<string, ChatThread>();
+const guestMessages = new Map<string, ChatMessage[]>();
+
 export class ApiService {
   public baseUrl: string;
 
@@ -203,7 +229,45 @@ export class ApiService {
     this.baseUrl = baseUrl.replace(/\/+$/, '').replace(/\/api$/i, '');
   }
 
+  isGuestMode(): boolean {
+    return typeof window !== 'undefined' && window.sessionStorage.getItem(GUEST_MODE_KEY) === 'true';
+  }
+
+  startGuestSession(): void {
+    if (typeof window === 'undefined') {
+      throw new Error('Guest demo mode can only be started in a browser.');
+    }
+    guestThreads.clear();
+    guestMessages.clear();
+    window.sessionStorage.setItem(GUEST_MODE_KEY, 'true');
+  }
+
+  private clearGuestSession(): void {
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.removeItem(GUEST_MODE_KEY);
+    }
+    guestThreads.clear();
+    guestMessages.clear();
+  }
+
+  private getGuestUser(): User {
+    const now = new Date().toISOString();
+    return {
+      id: 'floodsense-guest',
+      name: 'Guest Demo',
+      email: '',
+      role: 'researcher',
+      region: 'Demo workspace',
+      prefs: {},
+      preferred_theme: 'light',
+      created_at: now,
+    };
+  }
+
   private async requireUser() {
+    if (this.isGuestMode()) {
+      throw new Error('This account feature is unavailable in the guest demo. Sign in to use it.');
+    }
     const { data, error } = await getSupabaseClient().auth.getUser();
     if (error) throw error;
     if (!data.user) throw new Error('Sign in to access FloodSense data.');
@@ -277,19 +341,31 @@ export class ApiService {
   }
 
   private async postMultipart<T>(endpoint: string, formData: FormData): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
-      method: 'POST',
-      body: formData,
-    });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
-      const detail =
-        payload && typeof payload === 'object' && 'error' in payload
-          ? String(payload.error)
-          : response.statusText;
-      throw new Error(`Backend request failed (${response.status}): ${detail}`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+    try {
+      const response = await fetch(`${this.baseUrl}${endpoint}`, {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        const detail =
+          payload && typeof payload === 'object' && 'error' in payload
+            ? String(payload.error)
+            : response.statusText;
+        throw new Error(`Backend request failed (${response.status}): ${detail}`);
+      }
+      return payload as T;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw new Error('Backend request timed out after 45 seconds.');
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
-    return payload as T;
   }
 
   private resolveBackendUrl(path: string): string {
@@ -313,22 +389,24 @@ export class ApiService {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+      try {
+        const response = await fetch(url, {
+          ...options,
+          headers,
+          signal: controller.signal,
+        });
 
-      const response = await fetch(url, {
-        ...options,
-        headers,
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
+        if (!response.ok) {
+          const errorText = await response.text();
+          return { data: null, error: `HTTP ${response.status}: ${errorText || response.statusText}` };
+        }
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        return { data: null, error: `HTTP ${response.status}: ${errorText || response.statusText}` };
+        const json = await response.json();
+        return { data: json as T, error: null };
+      } finally {
+        clearTimeout(timeoutId);
       }
-
-      const json = await response.json();
-      return { data: json as T, error: null };
     } catch (err: any) {
       return {
         data: null,
@@ -424,6 +502,7 @@ export class ApiService {
     if (params.use_recommended !== undefined) {
       formData.append('use_recommended', String(params.use_recommended));
     }
+    if (params.question) formData.append('question', params.question);
 
     const result = await this.postMultipart<AnalyzeResponse>('/api/analyze', formData);
     result.overlay_url = this.resolveBackendUrl(result.overlay_url);
@@ -469,6 +548,7 @@ export class ApiService {
     });
     if (error) throw error;
     if (!result.user) throw new Error('Supabase did not return a user after sign-up.');
+    this.clearGuestSession();
 
     const user = this.mapProfile(null, result.user);
     return { user, requiresEmailConfirmation: !result.session };
@@ -481,15 +561,21 @@ export class ApiService {
     });
     if (error) throw error;
     if (!result.user) throw new Error('Supabase did not return a user after sign-in.');
+    this.clearGuestSession();
     return this.readProfile(result.user);
   }
 
   async logout(): Promise<void> {
+    if (this.isGuestMode()) {
+      this.clearGuestSession();
+      return;
+    }
     const { error } = await getSupabaseClient().auth.signOut();
     if (error) throw error;
   }
 
   async getCurrentUser(): Promise<User | null> {
+    if (this.isGuestMode()) return this.getGuestUser();
     const { data, error } = await getSupabaseClient().auth.getUser();
     if (error) throw error;
     if (!data.user) return null;
@@ -618,6 +704,14 @@ export class ApiService {
   // ═════════════════════════════════════════════════════════════════════════
 
   async getChats(): Promise<ChatThread[]> {
+    if (this.isGuestMode()) {
+      return [...guestThreads.values()]
+        .sort((first, second) => second.updated_at.localeCompare(first.updated_at))
+        .map((thread) => ({
+          ...thread,
+          preview_text: guestMessages.get(thread.id)?.at(-1)?.content,
+        }));
+    }
     const user = await this.requireUser();
     const client = getSupabaseClient();
     const { data, error } = await client
@@ -649,6 +743,7 @@ export class ApiService {
   }
 
   async getChat(chatId: string): Promise<ChatThread | null> {
+    if (this.isGuestMode()) return guestThreads.get(chatId) || null;
     const user = await this.requireUser();
     const { data, error } = await getSupabaseClient()
       .from('chat_threads')
@@ -665,6 +760,22 @@ export class ApiService {
     location_tag?: string;
     severity?: ChatThread['severity'];
   } = 'New Flood Inspection'): Promise<ChatThread> {
+    if (this.isGuestMode()) {
+      const now = new Date().toISOString();
+      const title = typeof options === 'string' ? options : options.title || 'New Flood Inspection';
+      const thread: ChatThread = {
+        id: `guest-${crypto.randomUUID()}`,
+        user_id: 'floodsense-guest',
+        title,
+        location_tag: typeof options === 'string' ? undefined : options.location_tag,
+        severity: typeof options === 'string' ? 'LOW' : options.severity || 'LOW',
+        created_at: now,
+        updated_at: now,
+      };
+      guestThreads.set(thread.id, thread);
+      guestMessages.set(thread.id, []);
+      return thread;
+    }
     const user = await this.requireUser();
     const title = typeof options === 'string' ? options : options.title || 'New Flood Inspection';
     const locationTag =
@@ -685,6 +796,10 @@ export class ApiService {
   }
 
   async deleteChat(chatId: string): Promise<boolean> {
+    if (this.isGuestMode()) {
+      guestMessages.delete(chatId);
+      return guestThreads.delete(chatId);
+    }
     const user = await this.requireUser();
     const client = getSupabaseClient();
     const { data: messages, error: messageError } = await client
@@ -712,6 +827,11 @@ export class ApiService {
   }
 
   async deleteAllChats(): Promise<void> {
+    if (this.isGuestMode()) {
+      guestThreads.clear();
+      guestMessages.clear();
+      return;
+    }
     const user = await this.requireUser();
     const { data: threads, error: listError } = await getSupabaseClient()
       .from('chat_threads')
@@ -725,6 +845,7 @@ export class ApiService {
   }
 
   async getChatMessages(threadId: string): Promise<ChatMessage[]> {
+    if (this.isGuestMode()) return [...(guestMessages.get(threadId) || [])];
     await this.requireUser();
     const { data, error } = await getSupabaseClient()
       .from('chat_messages')
@@ -750,6 +871,19 @@ export class ApiService {
   }
 
   async saveChatMessage(message: ChatMessage): Promise<ChatMessage> {
+    if (this.isGuestMode()) {
+      const thread = guestThreads.get(message.thread_id);
+      if (!thread) throw new Error('Guest conversation not found. Start a new demo chat.');
+      const messages = guestMessages.get(message.thread_id) || [];
+      const savedMessage = { ...message };
+      guestMessages.set(message.thread_id, [...messages, savedMessage]);
+      guestThreads.set(message.thread_id, {
+        ...thread,
+        updated_at: savedMessage.created_at,
+        preview_text: savedMessage.content,
+      });
+      return savedMessage;
+    }
     const user = await this.requireUser();
     const client = getSupabaseClient();
     const uploadedPaths: string[] = [];
@@ -855,6 +989,7 @@ export class ApiService {
   }
 
   async getGalleryItems(): Promise<GalleryItem[]> {
+    if (this.isGuestMode()) return [];
     await this.requireUser();
     const { data, error } = await getSupabaseClient()
       .from('chat_messages')

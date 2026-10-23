@@ -24,7 +24,7 @@ import { SitrepStream } from '../../../../components/SitrepStream';
 import { DamageTable } from '../../../../components/DamageTable';
 import { CitationDrawer } from '../../../../components/CitationDrawer';
 import { ChatMessage, CitationClause, DamageStats, RegionContext } from '../../../../lib/types';
-import { api } from '../../../../lib/api';
+import { api, type DamageMetrics } from '../../../../lib/api';
 import {
   FLOODNET_SAMPLES,
   loadFloodNetSampleImage,
@@ -49,7 +49,7 @@ const FLOODNET_CLASSES = [
   { name: 'grass', color: '#04fa07' },
 ];
 
-function mapDamageStats(metrics: Record<string, any>): DamageStats {
+function mapDamageStats(metrics: DamageMetrics): DamageStats {
   const summary = metrics.damage_summary || {};
   const buildings = metrics.buildings || {};
   const roads = metrics.roads || {};
@@ -78,15 +78,15 @@ function mapDamageStats(metrics: Record<string, any>): DamageStats {
     safe_roads_km: null,
     flood_depth_estimated_m: null,
     classes: FLOODNET_CLASSES.map((floodClass, id) => {
-      const percentage = Number(distribution[floodClass.name]) || 0;
+      const pixelCount = metrics.class_pixel_counts?.[floodClass.name] ??
+        Math.round(((Number(distribution[floodClass.name]) || 0) / 100) * 512 * 512);
       return {
         id,
         name: floodClass.name.replaceAll('-', ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
         color: floodClass.color,
-        pixel_count: Number(metrics.class_pixel_counts?.[floodClass.name]) ||
-          Math.round((percentage / 100) * 512 * 512),
+        pixel_count: pixelCount,
         area_m2: null,
-        percentage,
+        percentage: (pixelCount / (512 * 512)) * 100,
         is_flooded: [1, 3, 5, 8].includes(id),
       };
     }),
@@ -99,8 +99,8 @@ export default function ChatPage({ params }: ChatPageProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedSampleId = searchParams.get('sample_id');
-  const isFloodNetSampleId = (value: string | null): value is FloodNetSampleId =>
-    value !== null && Object.hasOwn(FLOODNET_SAMPLES, value);
+  const isFloodNetSampleId = (value: string | null | undefined): value is FloodNetSampleId =>
+    typeof value === 'string' && Object.hasOwn(FLOODNET_SAMPLES, value);
 
   const [currentThread, setCurrentThread] = useState<{
     id: string;
@@ -178,25 +178,38 @@ export default function ChatPage({ params }: ChatPageProps) {
         const lastUserMessage = [...savedMessages]
           .reverse()
           .find((message) => message.role === 'user');
-        if (lastUserMessage && lastMessage?.id === lastUserMessage.id) {
+        if (lastUserMessage) {
           const sampleMatch = lastUserMessage.raw_image_url?.match(/\/samples\/(10169|10815|6423)\./);
           if (sampleMatch) setActiveSector(sampleMatch[1] as '10169' | '10815' | '6423');
 
+          let restoredFile: File | undefined;
           if (lastUserMessage.raw_image_storage_path) {
-            const restoredFile = await api.downloadChatImage(lastUserMessage.raw_image_storage_path);
-            if (!active) return;
+            restoredFile = await api.downloadChatImage(lastUserMessage.raw_image_storage_path);
+          } else if (sampleMatch) {
+            restoredFile = await loadFloodNetSampleImage(sampleMatch[1] as FloodNetSampleId);
+          }
+          if (!active) return;
+
+          const hydratedLastUserMessage = restoredFile
+            ? { ...lastUserMessage, image_file: restoredFile }
+            : lastUserMessage;
+          if (restoredFile) {
             setMessages((previous) =>
               previous.map((message) =>
                 message.id === lastUserMessage.id
-                  ? { ...message, image_file: restoredFile }
+                  ? hydratedLastUserMessage
                   : message,
               ),
             );
-            setSelectedFile(restoredFile);
-            setSelectedImage(lastUserMessage.raw_image_url || null);
-            setSelectedFileName(restoredFile.name);
           }
-          setPendingAnalysisMessage(lastUserMessage);
+          if (lastMessage?.id === lastUserMessage.id) {
+            if (restoredFile) {
+              setSelectedFile(restoredFile);
+              setSelectedImage(lastUserMessage.raw_image_url || null);
+              setSelectedFileName(restoredFile.name);
+            }
+            setPendingAnalysisMessage(hydratedLastUserMessage);
+          }
         }
       } catch (error) {
         if (active) {
@@ -258,7 +271,7 @@ export default function ChatPage({ params }: ChatPageProps) {
   const submitPrompt = async (
     customText?: string,
     imageFile: File | null = selectedFile,
-    sampleId: string = activeSector,
+    sampleId?: string,
     imagePreview: string | null = selectedImage,
     existingUserMessage?: ChatMessage,
   ) => {
@@ -266,14 +279,43 @@ export default function ChatPage({ params }: ChatPageProps) {
     if (!textToSend.trim() && !imagePreview) return;
     setValidationError(null);
 
+    const previousImageMessage = [...messages]
+      .reverse()
+      .find((message) =>
+        message.role === 'user' &&
+        (message.image_file || message.raw_image_storage_path || message.raw_image_url),
+      );
+    const sourceImageFile = imageFile || (!sampleId ? previousImageMessage?.image_file : null);
+    const sourceImageUrl =
+      imagePreview ||
+      (sampleId
+        ? SECTOR_SCENARIOS.find((sector) => sector.id === sampleId)?.image
+        : previousImageMessage?.raw_image_url);
+    const sourceSampleMatch = sourceImageUrl?.match(/\/samples\/(10169|10815|6423)\./);
+    const sourceSampleId = isFloodNetSampleId(sampleId)
+      ? sampleId
+      : sourceSampleMatch && isFloodNetSampleId(sourceSampleMatch[1])
+        ? sourceSampleMatch[1]
+        : undefined;
+    const analysisImage = sourceImageFile ||
+      (sourceSampleId ? await loadFloodNetSampleImage(sourceSampleId) : undefined);
+    if (!analysisImage) {
+      setValidationError('Upload an image or choose a sample before starting image analysis.');
+      return;
+    }
+
     const userMsg: ChatMessage = existingUserMessage
-      ? { ...existingUserMessage, image_file: imageFile || undefined }
+      ? { ...existingUserMessage, image_file: analysisImage }
       : {
           id: `msg-${Date.now()}`,
           thread_id: threadId,
           role: 'user',
           content: textToSend || 'Initiating automated UAV sensor pass analysis.',
-          raw_image_url: imagePreview || SECTOR_SCENARIOS.find((sector) => sector.id === sampleId)?.image,
+          raw_image_url: imageFile
+            ? imagePreview || sourceImageUrl
+            : !sampleId
+              ? previousImageMessage?.raw_image_storage_path || sourceImageUrl || undefined
+              : sourceImageUrl || undefined,
           image_file: imageFile || undefined,
           region_context: attachedRegion || undefined,
           created_at: new Date().toISOString(),
@@ -292,25 +334,18 @@ export default function ChatPage({ params }: ChatPageProps) {
         : await api.saveChatMessage(userMsg);
       const displayUserMessage = {
         ...savedUserMessage,
-        image_file: userMsg.image_file,
+        image_file: analysisImage,
       };
       setMessages((previous) =>
         existingUserMessage
           ? previous.map((message) => message.id === userMsg.id ? displayUserMessage : message)
           : [...previous, displayUserMessage],
       );
-      const analysisImage =
-        imageFile ||
-        (isFloodNetSampleId(sampleId)
-          ? await loadFloodNetSampleImage(sampleId)
-          : undefined);
-      if (!analysisImage) {
-        throw new Error('Choose a valid FloodNet sample or upload an image before analysis.');
-      }
       const analysis = await api.analyze({
         image: analysisImage,
         model: 'segformer',
         use_recommended: false,
+        question: textToSend.trim() || undefined,
       });
       const citations: CitationClause[] = (analysis.retrieved_protocols || []).map((item) => ({
         id: item.citation_tag.replace(/^\[+|\]+$/g, ''),
@@ -349,11 +384,11 @@ export default function ChatPage({ params }: ChatPageProps) {
     void submitPrompt(
       pending.content,
       selectedFile,
-      activeSector,
+      undefined,
       pending.raw_image_url || null,
       pending,
     );
-  }, [pendingAnalysisMessage, selectedFile, activeSector]);
+  }, [pendingAnalysisMessage, selectedFile]);
 
   useEffect(() => {
     if (!pendingSampleId) return;
@@ -420,8 +455,9 @@ export default function ChatPage({ params }: ChatPageProps) {
       void submitPrompt(
         lastUserMsg.content,
         lastUserMsg.image_file || null,
-        activeSector,
+        undefined,
         lastUserMsg.raw_image_url || null,
+        lastUserMsg,
       );
     }
   };
@@ -520,8 +556,16 @@ export default function ChatPage({ params }: ChatPageProps) {
 
       {/* ────────────────── MESSAGE STREAM ────────────────── */}
       <div className="relative z-10 flex-1 overflow-y-auto px-4 sm:px-8 py-6 space-y-8 bg-white">
-        {messages.map((msg) => (
-          <div key={msg.id} className="max-w-6xl mx-auto space-y-4">
+        {messages.map((msg) => {
+          const sourceImageMessage = msg.role === 'assistant'
+            ? [...messages].reverse().find((message) =>
+                message.role === 'user' &&
+                (message.raw_image_storage_path === msg.raw_image_url ||
+                  message.raw_image_url === msg.raw_image_url),
+              )
+            : undefined;
+          return (
+            <div key={msg.id} className="max-w-6xl mx-auto space-y-4">
             {/* User Message */}
             {msg.role === 'user' && (
               <div className="flex flex-col items-end space-y-1.5">
@@ -574,8 +618,15 @@ export default function ChatPage({ params }: ChatPageProps) {
                         rawImageUrl={msg.raw_image_url}
                         maskImageUrl={msg.mask_image_url}
                         sampleId={activeSector}
-                        imageFile={msg.image_file}
+                        imageFile={msg.image_file || sourceImageMessage?.image_file}
                         classes={msg.damage_stats?.classes || []}
+                        onDamageMetricsChange={(metrics) => {
+                          setMessages((previous) => previous.map((message) =>
+                            message.id === msg.id
+                              ? { ...message, damage_stats: mapDamageStats(metrics) }
+                              : message,
+                          ));
+                        }}
                         onError={setValidationError}
                         onRegionSelect={(region) => {
                           setAttachedRegion(region);
@@ -651,8 +702,9 @@ export default function ChatPage({ params }: ChatPageProps) {
                 </div>
               </div>
             )}
-          </div>
-        ))}
+            </div>
+          );
+        })}
 
         {isProcessing && (
           <div className="max-w-6xl mx-auto space-y-3 pt-2">
@@ -673,24 +725,9 @@ export default function ChatPage({ params }: ChatPageProps) {
           {/* Quick Prompt Starter Pills */}
           <div className="flex items-center space-x-2 overflow-x-auto pb-1 text-[11px] font-mono scrollbar-none">
             <button
-              onClick={() => submitPrompt('What areas appear to be flooded in this image?')}
+              onClick={() => submitPrompt('Summarize the visible flood damage.')}
               className="px-2.5 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg flex items-center space-x-1.5 transition-colors shrink-0"
             >
-              <span className="text-cyan-600">💧</span>
-              <span>What areas are flooded?</span>
-            </button>
-            <button
-              onClick={() => submitPrompt('Which buildings appear to be affected?')}
-              className="px-2.5 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg flex items-center space-x-1.5 transition-colors shrink-0"
-            >
-              <span className="text-amber-600">🏢</span>
-              <span>Which buildings affected?</span>
-            </button>
-            <button
-              onClick={() => submitPrompt('Can you summarize the visible flood damage and evacuation route?')}
-              className="px-2.5 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg flex items-center space-x-1.5 transition-colors shrink-0"
-            >
-              <span className="text-emerald-600">📋</span>
               <span>Summarize visible damage</span>
             </button>
           </div>

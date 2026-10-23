@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import {
   ArrowRight,
@@ -18,6 +19,7 @@ import { FloodSenseLogo } from '../components/ui/FloodSenseLogo';
 import {
   FLOODNET_DATASET_DESCRIPTION,
   FLOODNET_CLASS_NAMES,
+  FLOODNET_SAMPLES,
 } from '../lib/floodnet-samples';
 
 export default function LandingPage() {
@@ -218,9 +220,48 @@ export default function LandingPage() {
             {FLOODNET_DATASET_DESCRIPTION}
           </p>
           <p className="text-xs leading-relaxed text-slate-500">
-            Semantic classes: {FLOODNET_CLASS_NAMES.join(', ')}. We are not showing sample
-            segmentation overlays here until each image and prediction can be verified together.
+            Semantic classes: {FLOODNET_CLASS_NAMES.join(', ')}. These examples pair the original
+            images with their FloodNet ground-truth annotation masks; masks are labels, not model predictions.
           </p>
+          <div className="grid gap-5 pt-5 text-left md:grid-cols-3">
+            {Object.values(FLOODNET_SAMPLES).map((sample) => (
+              <article
+                key={sample.id}
+                className="overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-800 shadow-xs"
+              >
+                <h3 className="px-4 py-3 text-sm font-semibold">{sample.title}</h3>
+                <div className="grid grid-cols-2 border-y border-slate-200">
+                  <div className="border-r border-slate-200">
+                    <Image
+                      src={sample.image}
+                      alt={`FloodNet aerial image ${sample.id}`}
+                      width={1024}
+                      height={682}
+                      unoptimized
+                      className="aspect-[3/2] w-full object-cover"
+                    />
+                    <p className="px-2 py-2 text-center text-[10px] font-mono text-slate-600">
+                      Input image
+                    </p>
+                  </div>
+                  <div>
+                    <Image
+                      src={sample.mask}
+                      alt={`FloodNet ground-truth segmentation annotation for image ${sample.id}`}
+                      width={1024}
+                      height={682}
+                      unoptimized
+                      className="aspect-[3/2] w-full object-cover"
+                    />
+                    <p className="px-2 py-2 text-center text-[10px] font-mono text-slate-600">
+                      Ground-truth mask
+                    </p>
+                  </div>
+                </div>
+                <p className="px-4 py-3 text-xs leading-relaxed text-slate-600">{sample.scene}</p>
+              </article>
+            ))}
+          </div>
           <Link
             href="/signin"
             className="inline-flex items-center gap-2 rounded-lg bg-cyan-600 px-4 py-2.5 text-xs font-medium text-white shadow-xs transition-colors hover:bg-cyan-700"

@@ -46,7 +46,7 @@ export const MaskViewer: React.FC<MaskViewerProps> = ({
   const initialMaskUrl = maskImageUrl || maskUrl || '/samples/10169_mask.png';
 
   const [opacity, setOpacity] = useState<number>(85);
-  const [viewMode, setViewMode] = useState<'overlay' | 'split'>('split');
+  const [viewMode, setViewMode] = useState<'blend' | 'swipe' | 'loupe'>('swipe');
   const [filterMode, setFilterMode] = useState<'normal' | 'thermal' | 'nightvision'>('normal');
   const [activeLayer, setActiveLayer] = useState<'segment' | 'depth'>('segment');
   const [selectedModel, setSelectedModel] = useState<'segformer' | 'classical' | 'sam'>('segformer');
@@ -61,6 +61,11 @@ export const MaskViewer: React.FC<MaskViewerProps> = ({
   const [splitPos, setSplitPos] = useState<number>(50);
   const [selectedPin, setSelectedPin] = useState<{ x: number; y: number } | null>(null);
   const [mousePos, setMousePos] = useState<{ x: number; y: number }>({ x: 50, y: 50 });
+  const [pixelPos, setPixelPos] = useState<{ x: number; y: number }>({ x: 300, y: 200 });
+  const [isHovering, setIsHovering] = useState<boolean>(false);
+  const [isDraggingDivider, setIsDraggingDivider] = useState<boolean>(false);
+  const pointerStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const hasDraggedRef = useRef<boolean>(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Dynamic photogrammetric ground distance covered by scale bar (meters)
@@ -163,20 +168,47 @@ export const MaskViewer: React.FC<MaskViewerProps> = ({
     }
   };
 
-  // Track mouse coordinates for dynamic HUD reticle and Swipe mode
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 100;
-    const y = ((e.clientY - rect.top) / rect.height) * 100;
-    setMousePos({ x, y });
-    if (viewMode === 'split') {
-      setSplitPos(Math.min(95, Math.max(5, x)));
+  // Track pointer coordinates for HUD, curtain split, and circular inspection loupe
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    pointerStartRef.current = { x: e.clientX, y: e.clientY };
+    hasDraggedRef.current = false;
+    if (viewMode === 'swipe' && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const xPercent = ((e.clientX - rect.left) / rect.width) * 100;
+      if (Math.abs(xPercent - splitPos) < 8) {
+        setIsDraggingDivider(true);
+      }
     }
   };
 
-  // Handle click on the image for "Ask the Image"
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const px = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+    const py = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
+    const xPercent = (px / rect.width) * 100;
+    const yPercent = (py / rect.height) * 100;
+
+    setPixelPos({ x: px, y: py });
+    setMousePos({ x: xPercent, y: yPercent });
+    setIsHovering(true);
+
+    if (Math.hypot(e.clientX - pointerStartRef.current.x, e.clientY - pointerStartRef.current.y) > 6) {
+      hasDraggedRef.current = true;
+    }
+
+    if (viewMode === 'swipe' && (isDraggingDivider || (e.buttons === 1 && hasDraggedRef.current))) {
+      setSplitPos(Math.min(95, Math.max(5, xPercent)));
+    }
+  };
+
+  const handlePointerUp = () => {
+    setIsDraggingDivider(false);
+  };
+
+  // Handle click on the image for "Ask the Image" (ignoring divider drags)
   const handleImageClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (hasDraggedRef.current || isDraggingDivider) return;
     if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100;
@@ -305,10 +337,10 @@ export const MaskViewer: React.FC<MaskViewerProps> = ({
             ))}
           </div>
 
-          {/* Opacity slider */}
-          {viewMode === 'overlay' && (
+          {/* Opacity slider for Alpha Blend */}
+          {viewMode === 'blend' && (
             <div className="flex items-center space-x-1.5">
-              <span className="text-slate-400 text-[10px]">Mask:</span>
+              <span className="text-slate-400 text-[10px]">Alpha:</span>
               <input
                 type="range"
                 min="0"
@@ -321,23 +353,40 @@ export const MaskViewer: React.FC<MaskViewerProps> = ({
             </div>
           )}
 
-          {/* Overlay vs Swipe toggle */}
+          {/* GIS Comparison View Mode Selector */}
           <div className="flex items-center border border-slate-700 bg-slate-950 text-[10px] rounded overflow-hidden">
             <button
-              onClick={() => setViewMode('overlay')}
-              className={`px-2 py-0.5 transition-colors ${
-                viewMode === 'overlay' ? 'bg-slate-700 text-slate-100 font-semibold' : 'text-slate-400 hover:text-slate-300'
+              type="button"
+              onClick={() => setViewMode('blend')}
+              className={`px-2 py-0.5 transition-colors flex items-center space-x-1 ${
+                viewMode === 'blend' ? 'bg-cyan-600 text-white font-bold' : 'text-slate-400 hover:text-slate-200'
               }`}
+              title="Alpha Blend: standard opacity slider"
             >
-              Overlay
+              <Sliders className="w-3 h-3" />
+              <span>Alpha Blend</span>
             </button>
             <button
-              onClick={() => setViewMode('split')}
-              className={`px-2 py-0.5 transition-colors ${
-                viewMode === 'split' ? 'bg-cyan-600 text-white font-bold' : 'text-slate-400 hover:text-slate-300'
+              type="button"
+              onClick={() => setViewMode('swipe')}
+              className={`px-2 py-0.5 transition-colors flex items-center space-x-1 ${
+                viewMode === 'swipe' ? 'bg-cyan-600 text-white font-bold' : 'text-slate-400 hover:text-slate-200'
               }`}
+              title="Curtain Swipe: horizontal comparative split"
             >
-              Swipe
+              <Split className="w-3 h-3" />
+              <span>Curtain Swipe</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('loupe')}
+              className={`px-2 py-0.5 transition-colors flex items-center space-x-1 ${
+                viewMode === 'loupe' ? 'bg-cyan-600 text-white font-bold' : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Inspection Loupe: circular local reveal lens (Ø 240px)"
+            >
+              <Eye className="w-3 h-3" />
+              <span>Inspection Loupe</span>
             </button>
           </div>
         </div>
@@ -347,7 +396,16 @@ export const MaskViewer: React.FC<MaskViewerProps> = ({
       <div
         ref={containerRef}
         onClick={handleImageClick}
-        onMouseMove={handleMouseMove}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerEnter={() => setIsHovering(true)}
+        onPointerLeave={() => setIsHovering(false)}
+        onPointerCancel={() => {
+          setIsDraggingDivider(false);
+          setIsHovering(false);
+        }}
+        style={{ touchAction: 'none' }}
         className="relative w-full aspect-[16/10] bg-black overflow-hidden cursor-crosshair select-none group touch-none"
       >
         {/* Layer 1: Raw Drone Image with Tactical Filters & Zoom */}
@@ -368,8 +426,8 @@ export const MaskViewer: React.FC<MaskViewerProps> = ({
           />
         </div>
 
-        {/* Layer 2: 10-Class Segmentation / Relative Depth Overlay */}
-        {liveOverlayUrl && viewMode === 'overlay' && (
+        {/* Layer 2: Alpha Blend Mode (10-Class Segmentation / Relative Depth Overlay) */}
+        {liveOverlayUrl && viewMode === 'blend' && (
           <div
             className="absolute inset-0 w-full h-full mix-blend-screen pointer-events-none transition-opacity duration-150"
             style={{
@@ -387,8 +445,8 @@ export const MaskViewer: React.FC<MaskViewerProps> = ({
           </div>
         )}
 
-        {/* Layer 2b: Split / Swipe view with clipPath for perfect 1:1 pixel alignment */}
-        {liveOverlayUrl && viewMode === 'split' && (
+        {/* Layer 2b: Curtain Swipe Mode with clipPath for perfect 1:1 pixel alignment */}
+        {liveOverlayUrl && viewMode === 'swipe' && (
           <div
             className="absolute inset-0 w-full h-full pointer-events-none"
             style={{
@@ -403,6 +461,31 @@ export const MaskViewer: React.FC<MaskViewerProps> = ({
               alt="Segmentation / Depth Map Overlay"
               className="w-full h-full object-cover"
             />
+          </div>
+        )}
+
+        {/* Layer 2c: Inspection Loupe Mode (Circular local reveal lens pinned to cursor) */}
+        {liveOverlayUrl && viewMode === 'loupe' && (
+          <div
+            className="absolute inset-0 w-full h-full pointer-events-none"
+            style={{
+              clipPath: `circle(120px at ${pixelPos.x}px ${pixelPos.y}px)`,
+            }}
+          >
+            <div
+              className="w-full h-full"
+              style={{
+                transform: `scale(${zoomLevel})`,
+                transformOrigin: `${mousePos.x}% ${mousePos.y}%`,
+              }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={liveOverlayUrl}
+                alt="Inspection Loupe Local Reveal"
+                className="w-full h-full object-cover"
+              />
+            </div>
           </div>
         )}
 
@@ -463,37 +546,89 @@ export const MaskViewer: React.FC<MaskViewerProps> = ({
           </div>
         )}
 
-        {/* Swipe Divider Line & Interactive Handle */}
-        {viewMode === 'split' && (
+        {/* Curtain Swipe Divider Line, Draggable Handle & GIS Status Pills */}
+        {viewMode === 'swipe' && (
           <>
-            {/* Sector Labels for Swipe Comparison */}
+            {/* GIS Non-Intrusive Status Pills */}
             <div
-              className={`absolute z-20 pointer-events-none px-2 py-0.5 bg-slate-900/85 border border-slate-700 text-[10px] font-mono text-slate-200 rounded shadow-xs ${
+              className={`absolute z-20 pointer-events-none px-2 py-0.5 bg-slate-900/90 border border-slate-700/80 text-[10px] font-mono text-slate-300 rounded shadow-xs select-none ${
                 showHud ? 'top-14 left-3' : 'top-3 left-3'
               }`}
             >
-              RAW UAV PHOTO
+              Optical Base Layer
             </div>
             <div
-              className={`absolute z-20 pointer-events-none px-2 py-0.5 bg-cyan-950/85 border border-cyan-500 text-[10px] font-mono text-cyan-300 rounded font-semibold shadow-xs ${
+              className={`absolute z-20 pointer-events-none px-2 py-0.5 bg-cyan-950/90 border border-cyan-500/80 text-[10px] font-mono text-cyan-300 rounded font-medium shadow-xs select-none ${
                 showHud ? 'top-32 right-3' : 'top-3 right-3'
               }`}
             >
-              {activeLayer === 'depth' ? 'RELATIVE SCENE DEPTH' : 'SEGMENTATION MASK'}
+              {activeLayer === 'depth' ? 'Relative Depth Layer' : 'Semantic Class Layer'}
             </div>
 
-            {/* Vertical Divider */}
+            {/* Vertical Divider with Pointer Capture & Smooth Touch Support */}
             <div
-              className="absolute inset-y-0 w-0.5 bg-cyan-400 cursor-ew-resize z-20 shadow-[0_0_12px_rgba(0,212,255,0.8)]"
-              style={{ left: `${splitPos}%` }}
+              className="absolute inset-y-0 w-0.5 bg-cyan-400 cursor-ew-resize z-20 shadow-[0_0_12px_rgba(0,212,255,0.8)] touch-none select-none"
+              style={{ left: `${splitPos}%`, touchAction: 'none' }}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                setIsDraggingDivider(true);
+                e.currentTarget.setPointerCapture(e.pointerId);
+              }}
+              onPointerMove={(e) => {
+                if (!isDraggingDivider || !containerRef.current) return;
+                const rect = containerRef.current.getBoundingClientRect();
+                const x = ((e.clientX - rect.left) / rect.width) * 100;
+                setSplitPos(Math.min(95, Math.max(5, x)));
+              }}
+              onPointerUp={(e) => {
+                setIsDraggingDivider(false);
+                try {
+                  e.currentTarget.releasePointerCapture(e.pointerId);
+                } catch {}
+              }}
+              onPointerCancel={() => setIsDraggingDivider(false)}
             >
-              <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 px-2.5 py-1 bg-slate-900 border border-cyan-400 rounded-full text-cyan-300 flex items-center space-x-1.5 shadow-xl text-[9px] font-mono font-bold tracking-wider hover:scale-110 transition-transform cursor-ew-resize">
+              <div
+                className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 px-2.5 py-1 bg-slate-950 border border-cyan-400 rounded-full text-cyan-300 flex items-center space-x-1.5 shadow-2xl text-[9px] font-mono font-bold tracking-wider hover:scale-110 active:scale-95 transition-transform cursor-ew-resize select-none"
+                title="Drag to compare Optical Base Layer with Semantic/Depth Layer"
+              >
                 <span>&larr;</span>
-                <span>SWIPE</span>
+                <span className="text-[8px] uppercase tracking-wider">SWIPE</span>
                 <span>&rarr;</span>
               </div>
             </div>
           </>
+        )}
+
+        {/* Inspection Loupe Vector Ring & Reticle Overlay (Diameter 240px) */}
+        {viewMode === 'loupe' && isHovering && (
+          <div
+            className="absolute pointer-events-none z-25 rounded-full border-2 border-cyan-400/90 shadow-[0_0_24px_rgba(0,0,0,0.85),inset_0_0_20px_rgba(6,182,212,0.15)] -translate-x-1/2 -translate-y-1/2"
+            style={{
+              width: '240px',
+              height: '240px',
+              left: `${pixelPos.x}px`,
+              top: `${pixelPos.y}px`,
+            }}
+          >
+            {/* Circumferential Reticle Tick Marks */}
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1 w-0.5 h-2 bg-cyan-400" />
+            <div className="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1 w-0.5 h-2 bg-cyan-400" />
+            <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1 h-0.5 w-2 bg-cyan-400" />
+            <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1 h-0.5 w-2 bg-cyan-400" />
+
+            {/* Central Precision Crosshairs */}
+            <div className="absolute inset-0 flex items-center justify-center opacity-40">
+              <div className="w-5 h-px bg-cyan-300" />
+              <div className="h-5 w-px bg-cyan-300 absolute" />
+            </div>
+
+            {/* Minimal GIS Loupe HUD Badge */}
+            <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-slate-950/95 border border-cyan-500/80 rounded text-[9px] font-mono text-cyan-300 whitespace-nowrap shadow-md flex items-center space-x-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+              <span>LOUPE: {activeLayer === 'depth' ? 'DEPTH LENS' : 'SEMANTIC MASK'} (Ø 240px)</span>
+            </div>
+          </div>
         )}
 
         {/* ────────────────── PROFESSIONAL UAV PHOTOGRAMMETRY & SENSOR HUD ────────────────── */}

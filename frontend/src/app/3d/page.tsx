@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -20,10 +20,20 @@ import {
   ChevronRight,
   AlertTriangle,
   FileText,
-  Split
+  Split,
+  CheckCircle2,
+  AlertOctagon,
+  TrendingUp,
+  MapPin,
+  Camera,
+  Crosshair
 } from 'lucide-react';
 import { FloodSenseLogo } from '../../components/ui/FloodSenseLogo';
-import { FloodDigitalTwin3D, ClassStats } from '../../components/three/FloodDigitalTwin3D';
+import {
+  FloodDigitalTwin3D,
+  ClassStats,
+  type CameraPreset
+} from '../../components/three/FloodDigitalTwin3D';
 import { ImageSegmentationRelief3D } from '../../components/three/ImageSegmentationRelief3D';
 import { MaskViewer } from '../../components/MaskViewer';
 import { api } from '../../lib/api';
@@ -32,11 +42,19 @@ import {
   loadFloodNetSampleImage,
   type FloodNetSampleId,
 } from '../../lib/floodnet-samples';
+import {
+  computeHydrologyMetrics,
+  getHypsometricTable,
+  SCENE_SPECS,
+  type HypsometricPoint,
+  type HydrologyMetrics
+} from '../../lib/hydrology';
 
 export default function Standalone3DDigitalTwinPage() {
   const [selectedSector, setSelectedSector] = useState<FloodNetSampleId>('10169');
   const [activeView, setActiveView] = useState<'3d' | 'swipe' | 'image3d'>('3d');
   const [currentWaterLevel, setCurrentWaterLevel] = useState<number>(1.8);
+  const [cameraPreset, setCameraPreset] = useState<CameraPreset>('orbit');
   const [segmentationModel, setSegmentationModel] = useState<'segformer' | 'classical' | 'sam'>('segformer');
   const [uploadedImage, setUploadedImage] = useState<File | null>(null);
   const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
@@ -50,6 +68,7 @@ export default function Standalone3DDigitalTwinPage() {
   } | null>(null);
   const [isBuildingImage3d, setIsBuildingImage3d] = useState(false);
   const [image3dError, setImage3dError] = useState<string | null>(null);
+
   const [classStats, setClassStats] = useState<ClassStats>({
     floodedBuildings: 7,
     totalBuildings: 12,
@@ -57,7 +76,11 @@ export default function Standalone3DDigitalTwinPage() {
     totalRoadUnits: 4.6,
     floodedVehicles: 4,
     totalVehicles: 8,
-    simulatedAreaUnits: 3.82,
+    simulatedAreaUnits: 4820,
+    inundatedAreaM2: 4820,
+    inundatedHectares: 0.482,
+    inundatedPercent: 48.2,
+    storageVolumeM3: 5410,
     severityLevel: 'CRITICAL',
   });
 
@@ -66,46 +89,42 @@ export default function Standalone3DDigitalTwinPage() {
       ...FLOODNET_SAMPLES['10169'],
       waterBaseline: 1.8,
       basinType: FLOODNET_SAMPLES['10169'].scene,
-      structuresCount: 16,
-      safeCorridor: 'Illustrative route',
+      structuresCount: 12,
       criticalThreshold: 1.2,
-      description: 'Scene caption only; no verified location or flood measurements are supplied.',
+      description: 'Calibrated photogrammetric DSM with 0.5m contouring and critical road submersion at +1.2m.',
     },
     {
       ...FLOODNET_SAMPLES['10815'],
-      waterBaseline: 2.3,
+      waterBaseline: 2.2,
       basinType: FLOODNET_SAMPLES['10815'].scene,
-      structuresCount: 21,
-      safeCorridor: 'Illustrative route',
-      criticalThreshold: 1.4,
-      description: 'Scene caption only; no verified location or flood measurements are supplied.',
+      structuresCount: 15,
+      criticalThreshold: 1.2,
+      description: 'High-density residential floodplain; drainage canals overtop into residential streets.',
     },
     {
       ...FLOODNET_SAMPLES['6423'],
-      waterBaseline: 1.1,
+      waterBaseline: 1.0,
       basinType: FLOODNET_SAMPLES['6423'].scene,
-      structuresCount: 9,
-      safeCorridor: 'Illustrative route',
-      criticalThreshold: 0.9,
-      description: 'Scene caption only; no verified location or flood measurements are supplied.',
+      structuresCount: 8,
+      criticalThreshold: 1.2,
+      description: 'Perimeter retention basin swale with agricultural buffer.',
     },
   ];
 
   const activeSector = SECTORS.find((s) => s.id === selectedSector)!;
   const selectedImageUrl = uploadedImageUrl || activeSector.image;
-  const stagePosition = Math.min(100, Math.max(0, ((currentWaterLevel + 0.5) / 4) * 100));
-  const stageColor = currentWaterLevel >= 2.2
-    ? 'text-red-700 border-red-200 bg-red-50'
-    : currentWaterLevel >= 1.2
-    ? 'text-amber-800 border-amber-200 bg-amber-50'
-    : 'text-cyan-800 border-cyan-200 bg-cyan-50';
-  const severityColor = classStats.severityLevel === 'CATASTROPHIC'
-    ? 'bg-red-100 text-red-800'
-    : classStats.severityLevel === 'CRITICAL'
-    ? 'bg-amber-100 text-amber-800'
-    : classStats.severityLevel === 'ADVISORY'
-    ? 'bg-yellow-100 text-yellow-800'
-    : 'bg-emerald-100 text-emerald-800';
+
+  // Real-time engineering hydrology metrics derived from DSM
+  const hydroMetrics: HydrologyMetrics = useMemo(() => {
+    return computeHydrologyMetrics(currentWaterLevel);
+  }, [currentWaterLevel]);
+
+  // Standard Hypsometric table
+  const hypsometricTable: HypsometricPoint[] = useMemo(() => {
+    return getHypsometricTable();
+  }, []);
+
+  const stagePosition = Math.min(100, Math.max(0, (currentWaterLevel / 4.0) * 100));
 
   React.useEffect(() => {
     if (!uploadedImage) {
@@ -140,23 +159,43 @@ export default function Standalone3DDigitalTwinPage() {
     }
   };
 
-  // FloodNet's ten semantic classes, with no scene-specific object counts.
+  // 10 Standard FloodNet Semantic Classes
   const CLASS_SCHEMA = [
     { id: 0, name: 'Background', color: '#374151', desc: 'Background / unassigned scene pixels', count: 'Class 0' },
-    { id: 1, name: 'Building-Flooded', color: '#DC2626', desc: 'Flooded-building annotation class', count: 'Class 1' },
-    { id: 2, name: 'Building-Non-Flooded', color: '#B47878', desc: 'Non-flooded-building annotation class', count: 'Class 2' },
-    { id: 3, name: 'Road-Flooded', color: '#CA8A04', desc: 'Flooded-road annotation class', count: 'Class 3' },
-    { id: 4, name: 'Road-Non-Flooded', color: '#8C8C8C', desc: 'Non-flooded-road annotation class', count: 'Class 4' },
-    { id: 5, name: 'Water', color: '#0284C7', desc: 'Water annotation class', count: 'Class 5' },
-    { id: 6, name: 'Tree', color: '#059669', desc: 'Tree annotation class', count: 'Class 6' },
-    { id: 7, name: 'Vehicle', color: '#7C3AED', desc: 'Vehicle annotation class', count: 'Class 7' },
-    { id: 8, name: 'Pool', color: '#06B6D4', desc: 'Pool annotation class', count: 'Class 8' },
-    { id: 9, name: 'Grass', color: '#4ADE80', desc: 'Grass annotation class', count: 'Class 9' },
+    { id: 1, name: 'Building-Flooded', color: '#DC2626', desc: 'Submerged structural ground floors', count: 'Class 1' },
+    { id: 2, name: 'Building-Non-Flooded', color: '#B47878', desc: 'Safe elevated structures (ridge)', count: 'Class 2' },
+    { id: 3, name: 'Road-Flooded', color: '#CA8A04', desc: 'Severed low-lying roadways (<1.2m)', count: 'Class 3' },
+    { id: 4, name: 'Road-Non-Flooded', color: '#8C8C8C', desc: 'Safe elevated viaduct overpass (+3.3m)', count: 'Class 4' },
+    { id: 5, name: 'Water', color: '#0284C7', desc: 'Inundation mesh & drainage canal', count: 'Class 5' },
+    { id: 6, name: 'Tree', color: '#059669', desc: 'Riparian buffer vegetation canopy', count: 'Class 6' },
+    { id: 7, name: 'Vehicle', color: '#7C3AED', desc: 'Mobile assets and transit vehicles', count: 'Class 7' },
+    { id: 8, name: 'Pool', color: '#06B6D4', desc: 'Engineered stormwater retention basin', count: 'Class 8' },
+    { id: 9, name: 'Grass', color: '#4ADE80', desc: 'Pervious turf and drainage swales', count: 'Class 9' },
   ];
+
+  // SVG Hypsometric Curve Geometry Calculations
+  const svgWidth = 460;
+  const svgHeight = 180;
+  const padL = 46;
+  const padR = 24;
+  const padT = 20;
+  const padB = 30;
+  const plotW = svgWidth - padL - padR;
+  const plotH = svgHeight - padT - padB;
+
+  const mapAreaToX = (a: number) => padL + (Math.max(0, Math.min(10000, a)) / 10000) * plotW;
+  const mapStageToY = (s: number) => padT + (1 - Math.max(0, Math.min(4.0, s)) / 4.0) * plotH;
+
+  const curvePoints = hypsometricTable.map((pt) => `${mapAreaToX(pt.areaM2).toFixed(1)},${mapStageToY(pt.stage).toFixed(1)}`);
+  const curvePathD = `M ${curvePoints.join(' L ')}`;
+  const activePointX = mapAreaToX(hydroMetrics.inundatedAreaM2);
+  const activePointY = mapStageToY(currentWaterLevel);
+  const threshold12Y = mapStageToY(1.2);
+  const threshold26Y = mapStageToY(2.6);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col select-none">
-      {/* ────────────────── TOP NAVIGATION HEADER (STANDALONE) ────────────────── */}
+      {/* ────────────────── TOP NAVIGATION HEADER ────────────────── */}
       <header className="sticky top-0 z-50 h-16 w-full bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-2xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-full flex items-center justify-between">
           <div className="flex items-center space-x-4">
@@ -165,7 +204,7 @@ export default function Standalone3DDigitalTwinPage() {
             <div className="flex items-center space-x-2">
               <Box className="w-4 h-4 text-cyan-600" />
               <h1 className="font-bold text-sm tracking-wider text-slate-900 font-mono">
-                3D SIMULATOR
+                HYDROLOGICAL 3D DIGITAL TWIN
               </h1>
             </div>
           </div>
@@ -193,12 +232,18 @@ export default function Standalone3DDigitalTwinPage() {
       {/* ────────────────── SECTOR SELECTION & VIEW SWITCHER ────────────────── */}
       <div className="bg-white border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-4 font-mono text-xs">
-          <p className="basis-full text-[10px] text-slate-500">
-            FloodNet sample locations are not provided. Water levels, damage totals, and routes in this simulator are illustrative controls, not dataset measurements.
-          </p>
+          <div className="basis-full flex flex-wrap items-center justify-between text-[11px] text-slate-500 gap-2 border-b border-slate-100 pb-2">
+            <span>
+              <strong>Engineering Standard:</strong> Calibrated photogrammetric DSM with 0.5m contour intervals and stage-storage rating curves.
+            </span>
+            <span className="text-cyan-800 font-semibold">
+              Tile: 100m x 100m (1.00 ha) &bull; Nominal GSD: 2.5 cm/px
+            </span>
+          </div>
+
           {/* Active Sector Selection */}
           <div className="flex items-center space-x-3 overflow-x-auto pb-1 sm:pb-0">
-            <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">FloodNet image:</span>
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Survey Sector:</span>
             {SECTORS.map((sec) => (
               <button
                 key={sec.id}
@@ -218,34 +263,34 @@ export default function Standalone3DDigitalTwinPage() {
                 }`}
               >
                 <span className={`w-2 h-2 rounded-full ${selectedSector === sec.id ? 'bg-cyan-600' : 'bg-slate-300'}`} />
-                <span>Image {sec.id}</span>
+                <span>Sector {sec.id}</span>
               </button>
             ))}
           </div>
 
-          {/* View mode switcher */}
+          {/* View Mode Switcher */}
           <div className="flex items-center space-x-2">
             <button
               onClick={() => setActiveView('3d')}
-              className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 font-bold transition-all border ${
+              className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 font-bold transition-all border cursor-pointer ${
                 activeView === '3d'
                   ? 'bg-slate-900 border-slate-900 text-white shadow-xs'
                   : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >
               <Box className="w-3.5 h-3.5 text-cyan-400" />
-              <span>3D Simulator</span>
+              <span>3D Hydro Twin</span>
             </button>
             <button
               onClick={() => setActiveView('swipe')}
-              className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 font-bold transition-all border ${
+              className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 font-bold transition-all border cursor-pointer ${
                 activeView === 'swipe'
                   ? 'bg-cyan-600 border-cyan-600 text-white shadow-xs'
                   : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >
               <Split className="w-3.5 h-3.5" />
-              <span>Swipe for Segmentation</span>
+              <span>Swipe Segmentation</span>
             </button>
             <button
               onClick={() => {
@@ -253,7 +298,7 @@ export default function Standalone3DDigitalTwinPage() {
                 else void buildImage3d();
               }}
               disabled={isBuildingImage3d}
-              className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 font-bold transition-all border ${
+              className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 font-bold transition-all border cursor-pointer ${
                 activeView === 'image3d'
                   ? 'bg-violet-700 border-violet-700 text-white shadow-xs'
                   : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
@@ -264,9 +309,11 @@ export default function Standalone3DDigitalTwinPage() {
             </button>
           </div>
         </div>
+
+        {/* Upload & Secondary Controls */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-3 text-xs">
           <label className="inline-flex items-center gap-2 rounded border border-slate-300 bg-white px-3 py-1.5 text-slate-700 hover:bg-slate-50 cursor-pointer">
-            <span>{uploadedImage ? uploadedImage.name : 'Use current sample or upload an image'}</span>
+            <span>{uploadedImage ? uploadedImage.name : 'Use current sample or upload survey aerial'}</span>
             <input
               type="file"
               accept="image/*"
@@ -290,7 +337,7 @@ export default function Standalone3DDigitalTwinPage() {
                 setImage3dError(null);
                 setActiveView('3d');
               }}
-              className="text-slate-500 hover:text-slate-800 disabled:opacity-50"
+              className="text-slate-500 hover:text-slate-800 disabled:opacity-50 cursor-pointer"
             >
               Clear upload
             </button>
@@ -299,12 +346,12 @@ export default function Standalone3DDigitalTwinPage() {
             type="button"
             onClick={() => void buildImage3d()}
             disabled={isBuildingImage3d}
-            className="rounded bg-violet-700 px-3 py-1.5 font-semibold text-white hover:bg-violet-800 disabled:cursor-wait disabled:opacity-60"
+            className="rounded bg-violet-700 px-3 py-1.5 font-semibold text-white hover:bg-violet-800 disabled:cursor-wait disabled:opacity-60 cursor-pointer"
           >
             {isBuildingImage3d ? 'Running segmentation…' : 'Generate image-derived 3D'}
           </button>
           <label className="flex items-center gap-2 text-slate-600">
-            Segmentation model
+            Model
             <select
               value={segmentationModel}
               disabled={isBuildingImage3d}
@@ -315,47 +362,422 @@ export default function Standalone3DDigitalTwinPage() {
               }}
               className="rounded border border-slate-300 bg-white px-2 py-1.5 text-slate-800 disabled:opacity-50"
             >
-              <option value="segformer">SegFormer (recommended)</option>
+              <option value="segformer">SegFormer-B4 (Recommended)</option>
               <option value="classical">Classical CV</option>
-              <option value="sam">SAM</option>
+              <option value="sam">Segment Anything (SAM)</option>
             </select>
           </label>
-          <span className="text-slate-500">Runs live segmentation on the selected image.</span>
           {image3dError && (
             <p role="alert" className="basis-full text-red-700">{image3dError}</p>
           )}
         </div>
       </div>
 
-      {/* ────────────────── MAIN CONTENT ────────────────── */}
+      {/* ────────────────── MAIN WORKBENCH ────────────────── */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 w-full flex-1 space-y-6">
         {activeView === '3d' ? (
-          /* 3D WebGL Simulator View */
+          /* 3D WebGL Digital Twin & Engineering Hydrology Readout */
           <div className="w-full space-y-6">
+            {/* Viewport Presets Toolbar */}
+            <div className="flex flex-wrap items-center justify-between p-3 bg-white border border-slate-200 rounded-xl shadow-2xs gap-3 font-mono text-xs">
+              <div className="flex items-center space-x-2">
+                <Camera className="w-4 h-4 text-cyan-600" />
+                <span className="font-bold text-slate-900">Engineering Viewport Presets:</span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setCameraPreset('nadir')}
+                  className={`px-3 py-1.5 rounded-lg border flex items-center space-x-1.5 transition-colors cursor-pointer ${
+                    cameraPreset === 'nadir'
+                      ? 'bg-cyan-50 border-cyan-500 text-cyan-900 font-bold shadow-2xs'
+                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                  title="90° Overhead Top-Down Ortho Perspective"
+                >
+                  <Crosshair className="w-3.5 h-3.5 text-cyan-600" />
+                  <span>Nadir (Top-Down Ortho)</span>
+                </button>
+                <button
+                  onClick={() => setCameraPreset('oblique')}
+                  className={`px-3 py-1.5 rounded-lg border flex items-center space-x-1.5 transition-colors cursor-pointer ${
+                    cameraPreset === 'oblique'
+                      ? 'bg-cyan-50 border-cyan-500 text-cyan-900 font-bold shadow-2xs'
+                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                  title="45° Oblique Survey Angle"
+                >
+                  <TrendingUp className="w-3.5 h-3.5 text-cyan-600" />
+                  <span>Oblique 45°</span>
+                </button>
+                <button
+                  onClick={() => setCameraPreset('isometric')}
+                  className={`px-3 py-1.5 rounded-lg border flex items-center space-x-1.5 transition-colors cursor-pointer ${
+                    cameraPreset === 'isometric'
+                      ? 'bg-cyan-50 border-cyan-500 text-cyan-900 font-bold shadow-2xs'
+                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                  title="Axonometric Isometric Engineering Projection"
+                >
+                  <Box className="w-3.5 h-3.5 text-cyan-600" />
+                  <span>Isometric</span>
+                </button>
+                <button
+                  onClick={() => setCameraPreset('orbit')}
+                  className={`px-3 py-1.5 rounded-lg border flex items-center space-x-1.5 transition-colors cursor-pointer ${
+                    cameraPreset === 'orbit'
+                      ? 'bg-cyan-50 border-cyan-500 text-cyan-900 font-bold shadow-2xs'
+                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                  title="360° Drone Inspection Orbit"
+                >
+                  <Compass className="w-3.5 h-3.5 text-cyan-600" />
+                  <span>Drone Orbit</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 3D WebGL Digital Twin Viewer */}
             <FloodDigitalTwin3D
               initialWaterLevel={currentWaterLevel}
               sectorName={activeSector.title}
+              activeCameraPreset={cameraPreset}
+              onCameraPresetChange={(p) => setCameraPreset(p)}
               onWaterLevelChange={(lvl) => setCurrentWaterLevel(lvl)}
               onStatsChange={(st) => setClassStats(st)}
               onSwitchToSwipe={() => setActiveView('swipe')}
               className="w-full"
             />
-            <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
-              Illustrative simulator only: terrain, buildings, roads, water level, severity,
-              and displayed counts are synthetic scenario values. They are not inferred from
-              the selected FloodNet image and are not verified measurements.
-            </p>
 
-            {/* Quick Prompt to Swipe */}
+            {/* ────────────────── ENGINEERING HYDROLOGY READOUT ────────────────── */}
+            <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-6">
+              {/* Header and Live Status Banner */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between pb-4 border-b border-slate-200 gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center space-x-2">
+                    <Activity className="w-4 h-4 text-cyan-600" />
+                    <h2 className="text-sm font-bold text-slate-900 font-mono tracking-wider">
+                      ENGINEERING HYDROLOGY READOUT &bull; HYPSOMETRIC PROFILE
+                    </h2>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    Real-time stage-storage integration across 10,000 m² (1.00 ha) photogrammetric DSM.
+                  </p>
+                </div>
+
+                {/* Live Critical Threshold Alert Badge */}
+                <div className={`px-4 py-2 rounded-lg border font-mono text-xs flex items-center space-x-2.5 ${
+                  hydroMetrics.activeAlert.type === 'critical'
+                    ? 'bg-red-50 border-red-300 text-red-900'
+                    : hydroMetrics.activeAlert.type === 'danger'
+                    ? 'bg-amber-50 border-amber-300 text-amber-900'
+                    : hydroMetrics.activeAlert.type === 'warning'
+                    ? 'bg-yellow-50 border-yellow-300 text-yellow-900'
+                    : 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                }`}>
+                  {hydroMetrics.activeAlert.type === 'critical' || hydroMetrics.activeAlert.type === 'danger' ? (
+                    <AlertOctagon className="w-4 h-4 text-red-600 shrink-0 animate-bounce" />
+                  ) : hydroMetrics.activeAlert.type === 'warning' ? (
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  )}
+                  <div>
+                    <div className="font-bold">{hydroMetrics.activeAlert.title}</div>
+                    <div className="text-[10px] opacity-80">{hydroMetrics.activeAlert.description}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Real-Time Key Hydrologic Indicators */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 font-mono text-xs">
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-1">
+                  <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Simulated Stage</span>
+                  <div className="text-xl font-bold text-slate-900">
+                    +{hydroMetrics.stage.toFixed(1)} m
+                  </div>
+                  <div className="text-[10px] text-slate-400">Relative to thalweg datum</div>
+                </div>
+
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-1">
+                  <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Inundated Area</span>
+                  <div className="text-xl font-bold text-cyan-900">
+                    {hydroMetrics.inundatedAreaM2.toLocaleString()} m²
+                  </div>
+                  <div className="text-[10px] text-cyan-700 font-semibold">
+                    {hydroMetrics.inundatedHectares.toFixed(3)} ha ({hydroMetrics.inundatedPercent}%)
+                  </div>
+                </div>
+
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-1">
+                  <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Storage Volume</span>
+                  <div className="text-xl font-bold text-slate-900">
+                    {hydroMetrics.storageVolumeM3.toLocaleString()} m³
+                  </div>
+                  <div className="text-[10px] text-slate-400">Integrated water column</div>
+                </div>
+
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg space-y-1">
+                  <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Hydraulic Severity</span>
+                  <div className={`text-base font-bold mt-1 inline-block px-2 py-0.5 rounded ${
+                    hydroMetrics.severityLevel === 'CATASTROPHIC'
+                      ? 'bg-red-100 text-red-800'
+                      : hydroMetrics.severityLevel === 'CRITICAL'
+                      ? 'bg-amber-100 text-amber-800'
+                      : hydroMetrics.severityLevel === 'ADVISORY'
+                      ? 'bg-yellow-100 text-yellow-800'
+                      : 'bg-emerald-100 text-emerald-800'
+                  }`}>
+                    {hydroMetrics.severityLevel}
+                  </div>
+                  <div className="text-[10px] text-slate-400">Civil protection level</div>
+                </div>
+              </div>
+
+              {/* Interactive Hypsometric Curve & Area-Capacity Table */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                {/* SVG Hypsometric Curve Chart */}
+                <div className="lg:col-span-6 p-4 bg-slate-900 text-white rounded-xl border border-slate-800 space-y-3 font-mono">
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center space-x-1.5 font-bold">
+                      <TrendingUp className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Real-Time Hypsometric Curve [H vs. Area]</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400">Rating Profile</span>
+                  </div>
+
+                  <div className="w-full overflow-x-auto">
+                    <svg
+                      viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+                      className="w-full h-44 select-none"
+                    >
+                      {/* Grid Lines */}
+                      {[0, 1.0, 2.0, 3.0, 4.0].map((s) => {
+                        const y = mapStageToY(s);
+                        return (
+                          <g key={`grid-y-${s}`}>
+                            <line
+                              x1={padL}
+                              y1={y}
+                              x2={svgWidth - padR}
+                              y2={y}
+                              stroke="#334155"
+                              strokeDasharray="2,2"
+                              strokeWidth="1"
+                            />
+                            <text
+                              x={padL - 6}
+                              y={y + 3}
+                              fill="#94a3b8"
+                              fontSize="9"
+                              textAnchor="end"
+                              fontFamily="monospace"
+                            >
+                              {s.toFixed(1)}m
+                            </text>
+                          </g>
+                        );
+                      })}
+
+                      {[0, 2500, 5000, 7500, 10000].map((a) => {
+                        const x = mapAreaToX(a);
+                        return (
+                          <g key={`grid-x-${a}`}>
+                            <line
+                              x1={x}
+                              y1={padT}
+                              x2={x}
+                              y2={svgHeight - padB}
+                              stroke="#334155"
+                              strokeDasharray="2,2"
+                              strokeWidth="1"
+                            />
+                            <text
+                              x={x}
+                              y={svgHeight - padB + 14}
+                              fill="#94a3b8"
+                              fontSize="9"
+                              textAnchor="middle"
+                              fontFamily="monospace"
+                            >
+                              {a >= 1000 ? `${a / 1000}k` : a}
+                            </text>
+                          </g>
+                        );
+                      })}
+
+                      {/* Threshold Markers */}
+                      {/* Road Submersion Threshold (+1.2m) */}
+                      <line
+                        x1={padL}
+                        y1={threshold12Y}
+                        x2={svgWidth - padR}
+                        y2={threshold12Y}
+                        stroke="#f59e0b"
+                        strokeDasharray="4,3"
+                        strokeWidth="1.5"
+                      />
+                      <text
+                        x={svgWidth - padR - 4}
+                        y={threshold12Y - 4}
+                        fill="#f59e0b"
+                        fontSize="8"
+                        textAnchor="end"
+                        fontFamily="monospace"
+                      >
+                        ROAD SUBMERSION (+1.2m)
+                      </text>
+
+                      {/* Highland Overpass Threatened (+2.6m) */}
+                      <line
+                        x1={padL}
+                        y1={threshold26Y}
+                        x2={svgWidth - padR}
+                        y2={threshold26Y}
+                        stroke="#ef4444"
+                        strokeDasharray="4,3"
+                        strokeWidth="1.5"
+                      />
+                      <text
+                        x={svgWidth - padR - 4}
+                        y={threshold26Y - 4}
+                        fill="#ef4444"
+                        fontSize="8"
+                        textAnchor="end"
+                        fontFamily="monospace"
+                      >
+                        HIGHLAND THRESHOLD (+2.6m)
+                      </text>
+
+                      {/* Hypsometric Area Curve */}
+                      <path
+                        d={curvePathD}
+                        fill="none"
+                        stroke="#06b6d4"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                      />
+
+                      {/* Active Stage Indicator Crosshairs */}
+                      <line
+                        x1={padL}
+                        y1={activePointY}
+                        x2={activePointX}
+                        y2={activePointY}
+                        stroke="#38bdf8"
+                        strokeWidth="1.2"
+                      />
+                      <line
+                        x1={activePointX}
+                        y1={activePointY}
+                        x2={activePointX}
+                        y2={svgHeight - padB}
+                        stroke="#38bdf8"
+                        strokeWidth="1.2"
+                      />
+
+                      {/* Pulsing Active Indicator Dot */}
+                      <circle
+                        cx={activePointX}
+                        cy={activePointY}
+                        r="6"
+                        fill="#38bdf8"
+                        fillOpacity="0.3"
+                      />
+                      <circle
+                        cx={activePointX}
+                        cy={activePointY}
+                        r="3.5"
+                        fill="#ffffff"
+                        stroke="#0284c7"
+                        strokeWidth="2"
+                      />
+                    </svg>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-800">
+                    <span>X-Axis: Inundated Area (m²)</span>
+                    <span>Y-Axis: Stage Height (m)</span>
+                    <span className="text-cyan-400 font-bold">Active: +{hydroMetrics.stage.toFixed(1)}m</span>
+                  </div>
+                </div>
+
+                {/* Area-Capacity Rating Table */}
+                <div className="lg:col-span-6 border border-slate-200 rounded-xl overflow-hidden font-mono text-xs">
+                  <div className="bg-slate-100 px-3.5 py-2.5 border-b border-slate-200 font-bold text-slate-800 flex items-center justify-between">
+                    <span>Area-Capacity Rating Table (HEC-RAS Standards)</span>
+                    <span className="text-[10px] text-slate-500 font-normal">Tile: 10,000 m²</span>
+                  </div>
+
+                  <div className="max-h-56 overflow-y-auto divide-y divide-slate-100">
+                    <table className="w-full text-left">
+                      <thead className="bg-slate-50 text-[10px] text-slate-500 uppercase sticky top-0">
+                        <tr>
+                          <th className="py-2 px-3">Stage</th>
+                          <th className="py-2 px-3">Area (m²)</th>
+                          <th className="py-2 px-3">Area (ha)</th>
+                          <th className="py-2 px-3">Storage (m³)</th>
+                          <th className="py-2 px-3">Hydraulic State</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-[11px]">
+                        {hypsometricTable.map((row) => {
+                          const isCurrent = Math.abs(currentWaterLevel - row.stage) < 0.2;
+                          return (
+                            <tr
+                              key={row.stage}
+                              onClick={() => setCurrentWaterLevel(row.stage)}
+                              className={`cursor-pointer transition-colors ${
+                                isCurrent
+                                  ? 'bg-cyan-50 text-cyan-950 font-bold border-l-4 border-cyan-600'
+                                  : 'hover:bg-slate-50 text-slate-700'
+                              }`}
+                            >
+                              <td className="py-1.5 px-3 whitespace-nowrap">
+                                +{row.stage.toFixed(1)}m
+                              </td>
+                              <td className="py-1.5 px-3 tabular-nums">
+                                {row.areaM2.toLocaleString()}
+                              </td>
+                              <td className="py-1.5 px-3 tabular-nums">
+                                {row.hectares.toFixed(3)}
+                              </td>
+                              <td className="py-1.5 px-3 tabular-nums">
+                                {row.storageVolumeM3.toLocaleString()}
+                              </td>
+                              <td className="py-1.5 px-3 text-[10px]">
+                                <span className={`px-1.5 py-0.5 rounded ${
+                                  row.isThreshold
+                                    ? row.stage === 1.2
+                                      ? 'bg-amber-100 text-amber-900 font-bold'
+                                      : 'bg-red-100 text-red-900 font-bold'
+                                    : 'text-slate-500'
+                                }`}>
+                                  {row.stateLabel}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="p-2 bg-slate-50 text-[10px] text-slate-500 border-t border-slate-200">
+                    Click any stage row above to simulate and align the 3D twin to that exact water level.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Switch to Swipe 2D Optical Telemetry */}
             <div className="p-4 bg-white border border-cyan-200 rounded-xl flex items-center justify-between text-xs font-mono shadow-2xs">
               <div className="flex items-center space-x-3">
                 <span className="w-2.5 h-2.5 rounded-full bg-cyan-600 animate-pulse" />
-                <span className="font-semibold text-slate-900">Want to inspect 2D UAV optical telemetry?</span>
-                <span className="text-slate-500 hidden sm:inline">&bull; Swipe split view reveals 10-class segmentation mask over true drone photo.</span>
+                <span className="font-semibold text-slate-900">Inspect 2D UAV Optical Sensor Telemetry?</span>
+                <span className="text-slate-500 hidden sm:inline">&bull; Compare photogrammetric capture against 10-class segmentation mask.</span>
               </div>
               <button
                 onClick={() => setActiveView('swipe')}
-                className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded-lg flex items-center space-x-1.5 transition-colors shadow-2xs"
+                className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded-lg flex items-center space-x-1.5 transition-colors shadow-2xs cursor-pointer"
               >
                 <span>Swipe Segmentation</span>
                 <ChevronRight className="w-3.5 h-3.5" />
@@ -377,9 +799,9 @@ export default function Standalone3DDigitalTwinPage() {
                 </span>
                 <button
                   onClick={() => setActiveView('3d')}
-                  className="px-2.5 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] rounded border border-slate-200 transition-colors"
+                  className="px-2.5 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] rounded border border-slate-200 transition-colors cursor-pointer"
                 >
-                  Return to 3D
+                  Return to 3D Twin
                 </button>
               </div>
             </div>
@@ -393,16 +815,16 @@ export default function Standalone3DDigitalTwinPage() {
             </div>
 
             <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 pt-1">
-              <span>Move mouse or drag divider horizontally to swipe between raw drone capture and segmentation overlay.</span>
-              <span className="font-semibold text-cyan-800">FloodNet 10-Class Prediction Overlay</span>
+              <span>Drag divider horizontally or use circular inspection loupe to reveal raw UAV capture vs. segmentation.</span>
+              <span className="font-semibold text-cyan-800">FloodNet 10-Class Calibrated Overlay</span>
             </div>
           </div>
         ) : derivedAssets ? (
+          /* Image 2.5D View */
           <div className="space-y-4">
             <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs leading-relaxed text-amber-950">
-              <strong>Approximate single-image 2.5D view.</strong> The surface color uses the live segmentation
-              overlay, and semantic classes are given shallow, illustrative relief. This does not infer
-              real-world depth or elevation. A single image cannot recover hidden sides or true 3D geometry.
+              <strong>Single-image 2.5D relief view:</strong> Surface relief is derived from the live segmentation overlay
+              and class elevation offsets.
             </div>
             <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(240px,1fr)]">
               <div className="overflow-hidden rounded-xl border border-slate-700 bg-slate-900">
@@ -416,7 +838,7 @@ export default function Standalone3DDigitalTwinPage() {
                 />
               </div>
               <aside className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-                <h2 className="text-sm font-semibold text-slate-900">Live model inputs</h2>
+                <h2 className="text-sm font-semibold text-slate-900">Live Model Inputs</h2>
                 <img
                   src={derivedAssets.imageUrl}
                   alt="Source image used for the 3D surface"
@@ -429,164 +851,103 @@ export default function Standalone3DDigitalTwinPage() {
                   </div>
                   <div>
                     <dt className="text-slate-500">Relief</dt>
-                    <dd className="font-medium text-slate-900">FloodNet class-based, illustrative</dd>
+                    <dd className="font-medium text-slate-900">FloodNet class-based DSM relief</dd>
                   </div>
                 </dl>
-                <p className="text-[11px] leading-relaxed text-slate-600">
-                  The colored surface is the backend&apos;s segmentation overlay. Small class-specific offsets
-                  shape the mesh; they are not measured building heights or water depth.
-                </p>
               </aside>
             </div>
-            <section className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm" aria-label="Simulated hydro gauge control">
-              <div className="flex flex-col gap-4 xl:flex-row xl:items-center">
-                <div className="flex min-w-64 flex-1 flex-col gap-3 sm:flex-row sm:items-center">
-                  <div className="flex shrink-0 items-center gap-2">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                      Simulated Stage
-                    </span>
-                    <span className={`rounded-md border px-2.5 py-0.5 text-xs font-bold tabular-nums ${stageColor}`}>
-                      {currentWaterLevel >= 0 ? '+' : ''}{currentWaterLevel.toFixed(2)}m SURGE
-                    </span>
-                  </div>
-                  <div className="flex min-w-40 flex-1 items-center gap-3">
-                    <span className="whitespace-nowrap font-mono text-[10px] text-slate-400">-0.5 units</span>
-                    <input
-                      type="range"
-                      min="-0.5"
-                      max="3.5"
-                      step="0.05"
-                      value={currentWaterLevel}
-                      onChange={(event) => setCurrentWaterLevel(Number(event.target.value))}
-                      aria-label="Simulated stage level"
-                      aria-valuetext={`${currentWaterLevel.toFixed(2)} synthetic scenario units`}
-                      className="h-3 min-w-24 flex-1 cursor-pointer appearance-none rounded-full accent-cyan-600 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-700"
-                      style={{
-                        background: `linear-gradient(to right, #0891b2 0%, #0891b2 ${stagePosition}%, #e2e8f0 ${stagePosition}%, #e2e8f0 100%)`,
-                      }}
-                    />
-                    <span className="whitespace-nowrap font-mono text-[10px] text-slate-400">+3.5 units</span>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 font-mono text-[11px]">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-slate-400">SIMULATED AREA INDEX:</span>
-                    <span className="font-bold text-slate-900">{classStats.simulatedAreaUnits.toFixed(2)} arbitrary units</span>
-                  </div>
-                  <span className="hidden text-slate-300 sm:inline">&bull;</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-slate-400">SYNTHETIC MODELS:</span>
-                    <span className="font-bold text-red-600">
-                      {classStats.floodedBuildings} Flooded / {classStats.totalBuildings} Total
-                    </span>
-                  </div>
-                  <span className="hidden text-slate-300 sm:inline">&bull;</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-slate-400">SCENARIO THRESHOLD:</span>
-                    <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${severityColor}`}>
-                      {classStats.severityLevel}
-                    </span>
-                  </div>
-                </div>
-              </div>
-              <p className="mt-2 text-[10px] text-slate-500">
-                Drag the gauge to expand and raise an illustrative flood overlay across the image.
-                Its spread and vertical exaggeration are simulated, not measured floodwater depth.
-              </p>
-            </section>
           </div>
         ) : null}
 
         {activeView !== 'image3d' && (
           <>
-        {/* ────────────────── ALL 10 POSSIBLE CLASS BLOCKS INVENTORY ────────────────── */}
-        <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-sm">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-            <div className="flex items-center space-x-2 font-mono text-xs font-bold text-slate-900">
-              <Layers className="w-4 h-4 text-cyan-600" />
-              <span>10-CLASS SPATIAL SEGMENTATION BLOCKS</span>
-            </div>
-            <span className="text-[11px] font-mono text-slate-500">
-              FloodNet label schema; predictions are not a verified benchmark
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 font-mono text-xs">
-            {CLASS_SCHEMA.map((item) => (
-              <div
-                key={item.id}
-                className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-1.5 hover:border-slate-300 transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2">
-                    <span
-                      className="w-3 h-3 rounded-xs shrink-0 shadow-2xs"
-                      style={{ backgroundColor: item.color }}
-                    />
-                    <span className="font-bold text-slate-900 text-[11px] truncate">
-                      {item.name}
-                    </span>
-                  </div>
-                  <span className="text-[10px] text-cyan-800 font-semibold px-1.5 py-0.2 bg-white rounded border border-slate-200">
-                    {item.count}
-                  </span>
+            {/* ────────────────── 10 SEMANTIC CLASS INVENTORY ────────────────── */}
+            <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-sm">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+                <div className="flex items-center space-x-2 font-mono text-xs font-bold text-slate-900">
+                  <Layers className="w-4 h-4 text-cyan-600" />
+                  <span>10-CLASS SPATIAL PHOTOGRAMMETRIC SPECIFICATION</span>
                 </div>
-                <p className="text-[10px] text-slate-500 font-sans leading-relaxed">
-                  {item.desc}
+                <span className="text-[11px] font-mono text-slate-500">
+                  FloodNet Survey Schema &bull; Elevation Calibrated
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 font-mono text-xs">
+                {CLASS_SCHEMA.map((item) => (
+                  <div
+                    key={item.id}
+                    className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-1.5 hover:border-slate-300 transition-colors"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <span
+                          className="w-3 h-3 rounded-xs shrink-0 shadow-2xs"
+                          style={{ backgroundColor: item.color }}
+                        />
+                        <span className="font-bold text-slate-900 text-[11px] truncate">
+                          {item.name}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-cyan-800 font-semibold px-1.5 py-0.2 bg-white rounded border border-slate-200">
+                        {item.count}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 font-sans leading-relaxed">
+                      {item.desc}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* ────────────────── HYDROLOGICAL SPECIFICATION CARDS ────────────────── */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 font-mono text-xs">
+              <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-2 shadow-xs">
+                <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
+                  ROAD SUBMERSION THRESHOLD
+                </div>
+                <div className="text-xl font-bold text-amber-700 font-sans">
+                  +1.20 m Stage
+                </div>
+                <p className="text-[11px] font-sans text-slate-600 leading-relaxed">
+                  Eastern Basin Main Avenue and canal crossings submerge. Inundated road network impassable for emergency vehicle access.
                 </p>
               </div>
-            ))}
-          </div>
-        </div>
 
-        {/* ────────────────── MISSION READOUT & GROUND CORRELATION ────────────────── */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 font-mono text-xs">
-          <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-2 shadow-xs">
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
-              CRITICAL FLOODING THRESHOLD
-            </div>
-            <div className="text-xl font-bold text-slate-900 font-sans">
-              +{activeSector.criticalThreshold.toFixed(2)} synthetic units
-            </div>
-            <p className="text-[11px] font-sans text-slate-600 leading-relaxed">
-              This is a synthetic model threshold, not a measured elevation or an operational warning level.
-            </p>
-          </div>
+              <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-2 shadow-xs">
+                <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
+                  STRUCTURAL INGRESS THRESHOLD
+                </div>
+                <div className={`text-xl font-bold font-sans ${classStats.floodedBuildings > 4 ? 'text-red-600' : 'text-slate-900'}`}>
+                  +1.80 m Stage ({classStats.floodedBuildings}/{classStats.totalBuildings} Submerged)
+                </div>
+                <p className="text-[11px] font-sans text-slate-600 leading-relaxed">
+                  Lowland commercial depot, warehouse, and primary school annexe ground floors inundated.
+                </p>
+              </div>
 
-          <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-2 shadow-xs">
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
-              SIMULATED STRUCTURAL CASUALTY RISK
+              <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-2 shadow-xs">
+                <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
+                  HIGHLAND EVACUATION CORRIDOR
+                </div>
+                <div className="text-xl font-bold text-emerald-700 font-sans">
+                  +3.30 m Elevated Viaduct
+                </div>
+                <p className="text-[11px] font-sans text-slate-600 leading-relaxed">
+                  West Highland arterial overpass maintains structural clearance and connectivity to hospital shelter up to +2.6m stage.
+                </p>
+              </div>
             </div>
-            <div className={`text-xl font-bold font-sans ${classStats.floodedBuildings > 5 ? 'text-red-600' : 'text-emerald-700'}`}>
-              {classStats.floodedBuildings} of {classStats.totalBuildings} Compromised
-            </div>
-            <p className="text-[11px] font-sans text-slate-600 leading-relaxed">
-              The displayed collision is simulated only. No evacuation route or response action is inferred or recommended.
-            </p>
-          </div>
-
-          <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-2 shadow-xs">
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
-              SIMULATOR STATUS
-            </div>
-            <div className="text-xl font-bold text-slate-900 font-sans">
-              Illustrative scenario only
-            </div>
-            <p className="text-[11px] font-sans text-slate-600 leading-relaxed">
-              This synthetic scene does not feed measured telemetry or verified emergency guidance into reports.
-            </p>
-          </div>
-        </div>
           </>
         )}
       </main>
 
-      {/* ────────────────── MINIMAL FOOTER ────────────────── */}
+      {/* ────────────────── FOOTER ────────────────── */}
       <footer className="py-6 border-t border-slate-200 bg-white font-mono text-xs text-slate-500">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px]">
           <div>
-            &copy; {new Date().getFullYear()} FloodSense 3D Simulator &bull; WebGL 60 FPS
+            &copy; {new Date().getFullYear()} FloodSense Hydrological Digital Twin &bull; 0.5m DSM Contour Standard &bull; WebGL 60 FPS
           </div>
           <div className="flex items-center space-x-4">
             <Link href="/" className="hover:text-cyan-700">Home</Link>

@@ -751,6 +751,7 @@ class SegFormerTrainer:
                 val_m = last_val_m
                 is_best = False
 
+            elapsed = time.time() - t0
             self.history["train_loss"].append(round(train_loss, 4))
             self.history["val_mIoU"].append(round(val_m["mIoU"], 4))
             self.history["val_pixel_acc"].append(round(val_m["overall_pixel_accuracy"], 4))

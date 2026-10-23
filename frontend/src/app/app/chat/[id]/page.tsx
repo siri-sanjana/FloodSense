@@ -31,6 +31,7 @@ import {
   type FloodNetSampleId,
 } from '../../../../lib/floodnet-samples';
 import { exportSitrep } from '../../../../lib/sitrep-export';
+import type { PassabilityMetrics, SafeCorridorResult } from '../../../../lib/passability';
 
 interface ChatPageProps {
   params: Promise<{ id: string }>;
@@ -129,6 +130,9 @@ export default function ChatPage({ params }: ChatPageProps) {
   const [publishedMessageIds, setPublishedMessageIds] = useState<Set<string>>(new Set());
   const [pendingAnalysisMessage, setPendingAnalysisMessage] = useState<ChatMessage | null>(null);
   const [pendingSampleId, setPendingSampleId] = useState<'10169' | '10815' | '6423' | null>(null);
+  const [passabilityActiveMessages, setPassabilityActiveMessages] = useState<Record<string, boolean>>({});
+  const [passabilityMetricsMap, setPassabilityMetricsMap] = useState<Record<string, PassabilityMetrics>>({});
+  const [safeCorridorResults, setSafeCorridorResults] = useState<Record<string, SafeCorridorResult | null>>({});
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
@@ -620,6 +624,22 @@ export default function ChatPage({ params }: ChatPageProps) {
                         sampleId={activeSector}
                         imageFile={msg.image_file || sourceImageMessage?.image_file}
                         classes={msg.damage_stats?.classes || []}
+                        showPassability={passabilityActiveMessages[msg.id] ?? false}
+                        onPassabilityChange={(metrics) => {
+                          setPassabilityMetricsMap((prev) => ({ ...prev, [msg.id]: metrics }));
+                        }}
+                        safeCorridorActive={passabilityActiveMessages[msg.id] ?? false}
+                        onSafeCorridorComputed={(corridor) => {
+                          setSafeCorridorResults((prev) => ({ ...prev, [msg.id]: corridor }));
+                          if (corridor) {
+                            const bld = corridor.targetBuildingId ? `from ${corridor.targetBuildingId} ` : '';
+                            setInputText(
+                              `Evacuation corridor routed ${bld}(${corridor.lengthMeters}m to boundary): ${
+                                corridor.isIsolated ? 'Obstruction detected, pathway isolated by floodwaters.' : 'Contiguous passable route identified.'
+                              } Assess passability for high-clearance rescue vehicles.`
+                            );
+                          }
+                        }}
                         onDamageMetricsChange={(metrics) => {
                           setMessages((previous) => previous.map((message) =>
                             message.id === msg.id
@@ -651,10 +671,20 @@ export default function ChatPage({ params }: ChatPageProps) {
                   </div>
                 </div>
 
-                {/* 10-Class Damage Distribution Table */}
+                {/* 10-Class Damage Distribution Table & Passability Analysis */}
                 {msg.damage_stats && (
                   <div className="w-full">
-                    <DamageTable stats={msg.damage_stats} />
+                    <DamageTable
+                      stats={msg.damage_stats}
+                      passabilityMetrics={passabilityMetricsMap[msg.id]}
+                      isPassabilityActive={passabilityActiveMessages[msg.id] ?? false}
+                      onAssessPassability={() => {
+                        setPassabilityActiveMessages((prev) => ({
+                          ...prev,
+                          [msg.id]: !prev[msg.id],
+                        }));
+                      }}
+                    />
                   </div>
                 )}
 

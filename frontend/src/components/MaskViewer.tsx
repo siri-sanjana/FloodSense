@@ -1,8 +1,18 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Eye, Sliders, Split, Maximize2, Crosshair, Zap, Compass, BatteryCharging, Radio, Layers, Navigation } from 'lucide-react';
+import { Eye, Sliders, Split, Maximize2, Crosshair, Zap, Compass, BatteryCharging, Radio, Layers, Navigation, Route } from 'lucide-react';
 import { RegionContext, SegmentationClass } from '../lib/types';
 import { api, type DamageMetrics } from '../lib/api';
+import {
+  analyzeRoadPassability,
+  createSyntheticRoadGrid,
+  extractRoadGridFromImage,
+  findShortestPassableCorridor,
+  getRoadVectorOverlays,
+  type PassabilityMetrics,
+  type RoadGridData,
+  type SafeCorridorResult,
+} from '../lib/passability';
 
 interface MaskViewerProps {
   rawImageUrl?: string;
@@ -17,6 +27,10 @@ interface MaskViewerProps {
   isScanning?: boolean;
   onRegionSelect?: (region: RegionContext) => void;
   onError?: (message: string) => void;
+  showPassability?: boolean;
+  onPassabilityChange?: (metrics: PassabilityMetrics) => void;
+  safeCorridorActive?: boolean;
+  onSafeCorridorComputed?: (result: SafeCorridorResult | null) => void;
 }
 
 interface StructuralCentroid {
@@ -41,6 +55,10 @@ export const MaskViewer: React.FC<MaskViewerProps> = ({
   isScanning = false,
   onRegionSelect,
   onError,
+  showPassability = false,
+  onPassabilityChange,
+  safeCorridorActive = false,
+  onSafeCorridorComputed,
 }) => {
   const finalRawUrl = rawImageUrl || imageUrl || '/samples/10169.jpg';
   const initialMaskUrl = maskImageUrl || maskUrl || '/samples/10169_mask.png';
@@ -70,6 +88,50 @@ export const MaskViewer: React.FC<MaskViewerProps> = ({
 
   // Dynamic photogrammetric ground distance covered by scale bar (meters)
   const scaleMeters = 50 / zoomLevel;
+
+  // Road network passability analyzer state
+  const [isPassabilityActive, setIsPassabilityActive] = useState<boolean>(showPassability);
+  const [isSafeCorridorMode, setIsSafeCorridorMode] = useState<boolean>(safeCorridorActive);
+  const [activeSafeCorridor, setActiveSafeCorridor] = useState<SafeCorridorResult | null>(null);
+  const [roadGrid, setRoadGrid] = useState<RoadGridData>(() =>
+    createSyntheticRoadGrid(128, 85, sampleId === '10169' ? 0.62 : 0.72)
+  );
+  const [passabilityMetrics, setPassabilityMetrics] = useState<PassabilityMetrics>(() =>
+    analyzeRoadPassability(createSyntheticRoadGrid(128, 85, sampleId === '10169' ? 0.62 : 0.72))
+  );
+
+  const vectorOverlays = useMemo(() => getRoadVectorOverlays(sampleId), [sampleId]);
+
+  useEffect(() => {
+    setIsPassabilityActive(showPassability);
+  }, [showPassability]);
+
+  useEffect(() => {
+    setIsSafeCorridorMode(safeCorridorActive);
+  }, [safeCorridorActive]);
+
+  // Analyze road grid whenever liveOverlayUrl or sampleId changes
+  useEffect(() => {
+    if (typeof window !== 'undefined' && liveOverlayUrl) {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const grid = extractRoadGridFromImage(img, 128, 85);
+        setRoadGrid(grid);
+        const metrics = analyzeRoadPassability(grid);
+        setPassabilityMetrics(metrics);
+        onPassabilityChange?.(metrics);
+      };
+      img.onerror = () => {
+        const grid = createSyntheticRoadGrid(128, 85, sampleId === '10169' ? 0.62 : 0.72);
+        setRoadGrid(grid);
+        const metrics = analyzeRoadPassability(grid);
+        setPassabilityMetrics(metrics);
+        onPassabilityChange?.(metrics);
+      };
+      img.src = liveOverlayUrl;
+    }
+  }, [liveOverlayUrl, sampleId]);
 
   // Sync damageMetrics prop if it updates externally
   useEffect(() => {
@@ -214,6 +276,22 @@ export const MaskViewer: React.FC<MaskViewerProps> = ({
     const x = ((e.clientX - rect.left) / rect.width) * 100;
     const y = ((e.clientY - rect.top) / rect.height) * 100;
 
+    // Safe Evacuation Corridor Computation Mode
+    if (isSafeCorridorMode) {
+      // Find if clicked near an identified building centroid
+      const clickedStructure = detectedStructures.find(
+        (s) => Math.hypot(s.x + s.w / 2 - x, s.y + s.h / 2 - y) < 16
+      );
+      const startPt = clickedStructure
+        ? { x: clickedStructure.x + clickedStructure.w / 2, y: clickedStructure.y + clickedStructure.h / 2 }
+        : { x, y };
+
+      const corridor = findShortestPassableCorridor(roadGrid, startPt, clickedStructure?.id);
+      setActiveSafeCorridor(corridor);
+      onSafeCorridorComputed?.(corridor);
+      return;
+    }
+
     setSelectedPin({ x, y });
 
     const matchedClass = classes.find(c => c.is_flooded) || classes[0] || {
@@ -321,6 +399,39 @@ export const MaskViewer: React.FC<MaskViewerProps> = ({
             <Crosshair className="w-3 h-3 text-cyan-400" />
             <span>HUD</span>
           </button>
+
+          {/* Road Network Passability Toggle */}
+          <button
+            type="button"
+            onClick={() => setIsPassabilityActive(!isPassabilityActive)}
+            className={`px-2 py-0.5 border rounded flex items-center space-x-1 text-[10px] font-mono transition-colors ${
+              isPassabilityActive
+                ? 'bg-emerald-950/80 border-emerald-500 text-emerald-300 font-semibold shadow-xs'
+                : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-slate-200'
+            }`}
+            title="Toggle Road Network Passability Overlay"
+          >
+            <Route className="w-3 h-3 text-emerald-400" />
+            <span className="hidden sm:inline">Passability</span>
+          </button>
+
+          {/* Safe Corridor Evacuation Mode Toggle */}
+          {isPassabilityActive && (
+            <button
+              type="button"
+              onClick={() => setIsSafeCorridorMode(!isSafeCorridorMode)}
+              className={`px-2 py-0.5 border rounded flex items-center space-x-1 text-[10px] font-mono transition-colors ${
+                isSafeCorridorMode
+                  ? 'bg-cyan-950/80 border-cyan-400 text-cyan-300 font-semibold shadow-xs'
+                  : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-slate-200'
+              }`}
+              title="Identify Safe Evacuation Corridor: click building to route to boundary"
+            >
+              <Navigation className="w-3 h-3 text-cyan-400" />
+              <span className="hidden sm:inline">Safe Corridor</span>
+              {activeSafeCorridor && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />}
+            </button>
+          )}
 
           {/* Zoom toggle */}
           <div className="hidden sm:flex items-center hairline-all border-slate-700 bg-slate-950 text-[10px]">
@@ -528,10 +639,151 @@ export const MaskViewer: React.FC<MaskViewerProps> = ({
                 <div className="absolute inset-0 flex items-center justify-center">
                   <span className={`w-1 h-1 rounded-full ${s.flooded ? 'bg-amber-400' : 'bg-emerald-400'}`} />
                   <span className={`absolute w-2.5 h-px ${s.flooded ? 'bg-amber-400/60' : 'bg-emerald-400/60'}`} />
-                  <span className={`absolute h-2.5 w-px ${s.flooded ? 'bg-amber-400/60' : 'bg-emerald-400/60'}`} />
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Layer 4: Topological Road Network Passability Vector Overlay (Scales with Zoom) */}
+        {isPassabilityActive && (
+          <div
+            className="absolute inset-0 pointer-events-none z-12"
+            style={{
+              transform: `scale(${zoomLevel})`,
+              transformOrigin: `${mousePos.x}% ${mousePos.y}%`,
+            }}
+          >
+            <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+              <defs>
+                {/* Inundated roadway amber/red hazard hatch pattern */}
+                <pattern
+                  id="inundation-hazard-hatch"
+                  width="4"
+                  height="4"
+                  patternTransform="rotate(45 0 0)"
+                  patternUnits="userSpaceOnUse"
+                >
+                  <line x1="0" y1="0" x2="0" y2="4" stroke="#dc2626" strokeWidth="1.6" opacity="0.8" />
+                  <line x1="2" y1="0" x2="2" y2="4" stroke="#f59e0b" strokeWidth="0.8" opacity="0.6" />
+                </pattern>
+              </defs>
+
+              {/* 1. Inundated Road Segments (Hatched Amber/Red Obstructed Pattern) */}
+              {vectorOverlays.inundatedPolygons.map((pts, i) => (
+                <polygon
+                  key={`inundated-${i}`}
+                  points={pts}
+                  fill="url(#inundation-hazard-hatch)"
+                  stroke="#ef4444"
+                  strokeWidth="0.8"
+                  strokeDasharray="1.5 1.5"
+                  opacity="0.9"
+                />
+              ))}
+
+              {/* 2. Passable Road Corridors (Clean Solid Green Contour, stroke: 2px, opacity: 0.8) */}
+              {vectorOverlays.passablePolylines.map((pts, i) => (
+                <polyline
+                  key={`passable-${i}`}
+                  points={pts}
+                  fill="none"
+                  stroke="#10b981"
+                  strokeWidth="2"
+                  strokeOpacity="0.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              ))}
+
+              {/* 3. Computed Safe Corridor Evacuation Polyline */}
+              {activeSafeCorridor && activeSafeCorridor.path.length > 1 && (
+                <>
+                  <polyline
+                    points={activeSafeCorridor.path.map((p) => `${p.x},${p.y}`).join(' ')}
+                    fill="none"
+                    stroke="#0891b2"
+                    strokeWidth="4"
+                    strokeOpacity="0.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <polyline
+                    points={activeSafeCorridor.path.map((p) => `${p.x},${p.y}`).join(' ')}
+                    fill="none"
+                    stroke="#06b6d4"
+                    strokeWidth="2.5"
+                    strokeDasharray={activeSafeCorridor.isIsolated ? '2 2' : undefined}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </>
+              )}
+            </svg>
+
+            {/* Safe Corridor Start & Exit Waypoint Markers */}
+            {activeSafeCorridor && (
+              <>
+                <div
+                  className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none flex flex-col items-center"
+                  style={{ left: `${activeSafeCorridor.start.x}%`, top: `${activeSafeCorridor.start.y}%` }}
+                >
+                  <div className="w-3.5 h-3.5 rounded-full bg-cyan-400 border-2 border-white shadow-lg flex items-center justify-center">
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-950" />
+                  </div>
+                  <div className="mt-0.5 px-1.5 py-0.2 bg-slate-950/95 border border-cyan-400 text-[8px] font-mono text-cyan-300 rounded whitespace-nowrap shadow-md">
+                    EVAC START: {activeSafeCorridor.targetBuildingId || 'ORIGIN'}
+                  </div>
+                </div>
+
+                <div
+                  className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none flex flex-col items-center"
+                  style={{ left: `${activeSafeCorridor.exit.x}%`, top: `${activeSafeCorridor.exit.y}%` }}
+                >
+                  <div className={`w-3.5 h-3.5 rounded-full border-2 border-white shadow-lg flex items-center justify-center ${activeSafeCorridor.isIsolated ? 'bg-amber-500' : 'bg-emerald-500'}`}>
+                    <span className="w-1.5 h-1.5 rounded-full bg-white" />
+                  </div>
+                  <div className={`mt-0.5 px-1.5 py-0.2 bg-slate-950/95 border text-[8px] font-mono rounded whitespace-nowrap shadow-md ${activeSafeCorridor.isIsolated ? 'border-amber-400 text-amber-300' : 'border-emerald-400 text-emerald-300'}`}>
+                    {activeSafeCorridor.isIsolated ? 'FLOOD BLOCKED' : `SCENE BOUNDARY EXIT (${activeSafeCorridor.lengthMeters}m)`}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Road Network Passability HUD Card */}
+        {isPassabilityActive && (
+          <div className="absolute top-16 right-3 z-20 pointer-events-none bg-slate-950/90 backdrop-blur-xs border border-emerald-500/60 p-2.5 rounded shadow-lg text-[9px] font-mono text-slate-300 w-56 space-y-1">
+            <div className="flex items-center justify-between pb-1 border-b border-slate-800 text-[8px] uppercase tracking-wider font-semibold">
+              <span className="flex items-center space-x-1 text-emerald-400">
+                <Route className="w-2.5 h-2.5 text-emerald-400" />
+                <span>Road Passability</span>
+              </span>
+              <span className={`px-1 py-0.2 rounded text-[7px] font-bold ${
+                passabilityMetrics.status === 'OPTIMAL' ? 'bg-emerald-950 text-emerald-300 border border-emerald-700' :
+                passabilityMetrics.status === 'MODERATE' ? 'bg-amber-950 text-amber-300 border border-amber-700' :
+                'bg-red-950 text-red-300 border border-red-700'
+              }`}>
+                {passabilityMetrics.status}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[8px] pt-0.5">
+              <span className="text-slate-500">PASSABILITY INDEX:</span>
+              <span className="text-emerald-400 text-right font-bold">{passabilityMetrics.networkPassabilityIndex}%</span>
+              <span className="text-slate-500">TOTAL ROAD:</span>
+              <span className="text-slate-200 text-right">{passabilityMetrics.totalRoadPixels.toLocaleString()} px</span>
+              <span className="text-slate-500">INUNDATED ROAD:</span>
+              <span className="text-red-400 text-right">{passabilityMetrics.inundatedRoadPixels.toLocaleString()} px</span>
+              <span className="text-slate-500">8-CONN CUTS:</span>
+              <span className="text-amber-300 text-right font-semibold">{passabilityMetrics.disconnectedSegmentsCount} segments</span>
+            </div>
+            {isSafeCorridorMode && (
+              <div className="pt-1 border-t border-slate-800 text-[8px] text-cyan-300 flex items-center space-x-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                <span>Click building to route exit corridor</span>
+              </div>
+            )}
           </div>
         )}
 

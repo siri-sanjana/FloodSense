@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -8,7 +8,6 @@ import {
   Search,
   Image as ImageIcon,
   Settings,
-  Camera,
   PanelLeftClose,
   PanelLeftOpen,
   AlertTriangle,
@@ -44,7 +43,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [user, setUser] = useState({ ...CURRENT_USER, avatar_url: undefined as string | undefined });
   const [dataError, setDataError] = useState<string | null>(null);
-  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     localStorage.removeItem('floodsense_theme');
@@ -108,36 +106,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       router.push('/signin');
     } catch (error) {
       setDataError(error instanceof Error ? error.message : 'Could not sign out.');
-    }
-  };
-
-  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-
-    try {
-      const updatedUser = await api.uploadProfileAvatar(file);
-      setUser((previous) => ({
-        ...previous,
-        name: updatedUser.name,
-        email: updatedUser.email,
-        role: isUserRole(updatedUser.role) ? updatedUser.role : previous.role,
-        avatar_url: updatedUser.avatar_url,
-      }));
-      setDataError(null);
-    } catch (error) {
-      setDataError(error instanceof Error ? error.message : 'Could not upload your profile photo.');
-      try {
-        const refreshedUser = await api.getCurrentUser();
-        if (refreshedUser) {
-          setUser((previous) => ({ ...previous, avatar_url: refreshedUser.avatar_url }));
-        }
-      } catch (refreshError) {
-        setDataError((previous) => `${previous} Profile refresh failed: ${
-          refreshError instanceof Error ? refreshError.message : 'unknown error'
-        }`);
-      }
     }
   };
 
@@ -434,16 +402,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <span>Settings &amp; Preferences</span>
             </Link>
 
-            <button
-              onClick={() => {
-                avatarInputRef.current?.click();
-              }}
-              className="w-full flex items-center space-x-2 px-3 py-2 rounded-lg text-xs text-slate-700 hover:bg-slate-100 transition-colors"
-            >
-              <Camera className="w-3.5 h-3.5 text-cyan-600" />
-              <span>Upload profile photo</span>
-            </button>
-
             <div className="pt-1 border-t border-slate-100">
               <button
                 onClick={handleSignOut}
@@ -528,29 +486,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <span className="text-[11px] hidden sm:inline-block">Command Palette...</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => avatarInputRef.current?.click()}
-            title="Upload profile photo"
-            aria-label="Upload profile photo"
-            className="w-8 h-8 rounded-full border border-slate-200 bg-slate-100 text-slate-600 hover:border-cyan-500 overflow-hidden flex items-center justify-center transition-colors"
-          >
-            {user.avatar_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
-            ) : (
-              <Camera className="w-4 h-4" />
-            )}
-          </button>
         </div>
       </header>
-      <input
-        ref={avatarInputRef}
-        type="file"
-        accept="image/jpeg,image/png,image/webp"
-        className="hidden"
-        onChange={(event) => void handleAvatarUpload(event)}
-      />
 
       {/* ─────────────────────────── MAIN WRAPPER ─────────────────────────── */}
       <div className="flex-1 flex overflow-hidden relative">

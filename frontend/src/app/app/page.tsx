@@ -5,6 +5,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   UploadCloud,
+  Camera,
+  FolderOpen,
+  Image as ImageIcon,
   ArrowRight,
   ShieldAlert,
   X,
@@ -17,16 +20,13 @@ import {
   HelpCircle
 } from 'lucide-react';
 import { api } from '../../lib/api';
-import {
-  FLOODNET_DATASET_DESCRIPTION,
-  FLOODNET_CLASS_NAMES,
-  FLOODNET_SAMPLES,
-} from '../../lib/floodnet-samples';
 import { FloodSenseLogo } from '../../components/ui/FloodSenseLogo';
 
 export default function AppWelcomePage() {
   const router = useRouter();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadPhotoRef = useRef<HTMLInputElement>(null);
+  const cameraCaptureRef = useRef<HTMLInputElement>(null);
+  const browseFilesRef = useRef<HTMLInputElement>(null);
 
   const [question, setQuestion] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -42,34 +42,6 @@ export default function AppWelcomePage() {
     'Can you summarize the visible flood damage?',
     'Explain the assessment results in simple terms.',
   ];
-
-  const SAMPLE_INCIDENTS = [
-    {
-      ...FLOODNET_SAMPLES['10169'],
-    },
-    {
-      ...FLOODNET_SAMPLES['10815'],
-    },
-    {
-      ...FLOODNET_SAMPLES['6423'],
-    },
-  ];
-
-  const handleOpenSample = async (sample: (typeof SAMPLE_INCIDENTS)[number]) => {
-    setIsSubmitting(true);
-    setErrorMsg(null);
-    try {
-      const thread = await api.createChat({
-        title: sample.title,
-        location_tag: `FloodNet sample ${sample.id}; location not provided`,
-        severity: 'MODERATE',
-      });
-      router.push(`/app/chat/${thread.id}?sample_id=${sample.id}`);
-    } catch (error) {
-      setErrorMsg(error instanceof Error ? error.message : 'Could not create a sample assessment.');
-      setIsSubmitting(false);
-    }
-  };
 
   const handleFile = (file: File) => {
     setErrorMsg(null);
@@ -213,24 +185,65 @@ export default function AppWelcomePage() {
                     Supports JPEG, PNG, WebP (up to 20MB)
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="px-4 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-lg text-xs transition-colors font-sans shadow-2xs"
-                >
-                  Browse Files
-                </button>
                 <input
-                  ref={fileInputRef}
+                  ref={uploadPhotoRef}
                   type="file"
-                  accept="image/jpeg,image/png,image/webp"
+                  accept="image/*"
                   className="hidden"
                   onChange={(e) => {
                     if (e.target.files && e.target.files[0]) {
                       handleFile(e.target.files[0]);
                     }
+                    e.currentTarget.value = '';
                   }}
                 />
+                <input
+                  ref={cameraCaptureRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) handleFile(e.target.files[0]);
+                    e.currentTarget.value = '';
+                  }}
+                />
+                <input
+                  ref={browseFilesRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) handleFile(e.target.files[0]);
+                    e.currentTarget.value = '';
+                  }}
+                />
+                <div className="flex flex-wrap justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => uploadPhotoRef.current?.click()}
+                    className="inline-flex items-center gap-2 rounded-lg border border-cyan-600 bg-cyan-600 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-cyan-700"
+                  >
+                    <ImageIcon className="h-4 w-4" />
+                    Upload photo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => cameraCaptureRef.current?.click()}
+                    className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100"
+                  >
+                    <Camera className="h-4 w-4" />
+                    Take photo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => browseFilesRef.current?.click()}
+                    className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100"
+                  >
+                    <FolderOpen className="h-4 w-4" />
+                    Browse files
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -304,44 +317,6 @@ export default function AppWelcomePage() {
           </div>
         </form>
 
-        {/* Preloaded Incidents */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between text-xs text-slate-600">
-            <span className="uppercase tracking-wider text-[10px] font-semibold">FloodNet sample images:</span>
-            <span className="text-[10px] text-cyan-700 font-medium">RESEARCH DATASET</span>
-          </div>
-          <p className="text-[11px] leading-relaxed text-slate-600">
-            {FLOODNET_DATASET_DESCRIPTION} Classes: {FLOODNET_CLASS_NAMES.join(', ')}.
-          </p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {SAMPLE_INCIDENTS.map((inc) => (
-              <button
-                key={inc.id}
-                type="button"
-                onClick={() => void handleOpenSample(inc)}
-                disabled={isSubmitting}
-                className="group w-full text-left p-3 bg-white border border-slate-200 hover:border-cyan-500 rounded-xl space-y-2 transition-all block shadow-xs disabled:opacity-60"
-              >
-                <div className="aspect-video w-full rounded-lg overflow-hidden relative bg-slate-100 border border-slate-100">
-                  <img
-                    src={inc.image}
-                    alt={inc.title}
-                    className="w-full h-full object-cover group-hover:scale-102 transition-transform duration-200"
-                  />
-                </div>
-                <div>
-                  <div className="font-sans text-xs font-semibold text-slate-900 group-hover:text-cyan-700 truncate transition-colors">
-                    {inc.title}
-                  </div>
-                  <div className="text-[10px] text-slate-500 truncate mt-0.5">
-                    {inc.scene} &bull; Dataset ID {inc.id}
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
       </div>
     </div>
   );

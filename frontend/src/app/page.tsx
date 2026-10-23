@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import Link from 'next/link';
 import {
   ArrowRight,
@@ -14,26 +14,13 @@ import {
   FileText
 } from 'lucide-react';
 import { FloodHero3D } from '../components/three/FloodHero3D';
-import { MaskViewer } from '../components/MaskViewer';
 import { FloodSenseLogo } from '../components/ui/FloodSenseLogo';
 import {
   FLOODNET_DATASET_DESCRIPTION,
   FLOODNET_CLASS_NAMES,
-  FLOODNET_SAMPLES,
-  type FloodNetSampleId,
 } from '../lib/floodnet-samples';
 
 export default function LandingPage() {
-  const [selectedWalkthrough, setSelectedWalkthrough] = useState<FloodNetSampleId>('10169');
-
-  const WALKTHROUGH_SAMPLES = {
-    '10169': FLOODNET_SAMPLES['10169'],
-    '10815': FLOODNET_SAMPLES['10815'],
-    '6423': FLOODNET_SAMPLES['6423'],
-  };
-
-  const activeWalkthrough = WALKTHROUGH_SAMPLES[selectedWalkthrough];
-
   return (
     <div className="relative min-h-screen bg-white text-slate-900 selection:bg-cyan-100 selection:text-cyan-900 font-sans">
       {/* ─────────────────────────── TOP NAVIGATION ─────────────────────────── */}
@@ -47,8 +34,8 @@ export default function LandingPage() {
             <a href="#capabilities-workflow" className="hover:text-cyan-700 transition-colors">
               Capabilities &amp; Workflow
             </a>
-            <a href="#dashboard-walkthrough" className="hover:text-cyan-700 transition-colors">
-              Dashboard &amp; Walkthrough
+            <a href="#dataset" className="hover:text-cyan-700 transition-colors">
+              Dataset
             </a>
           </nav>
 
@@ -222,91 +209,25 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ─────────────────────────── COMBINED SECTION 3: DASHBOARD & WALKTHROUGH ─────────────────────────── */}
-      <section id="dashboard-walkthrough" className="py-20 px-4 sm:px-6 max-w-7xl mx-auto border-b border-slate-200">
-        <div className="text-center space-y-3 max-w-3xl mx-auto mb-10">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-cyan-50 border border-cyan-200 rounded text-xs font-mono text-cyan-800">
-            <span>FLOODNET SAMPLE EXPLORER</span>
-          </div>
-          <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900">
-            Explore FloodNet Aerial Samples
+      <section id="dataset" className="border-b border-slate-200 bg-slate-50 px-4 py-16 sm:px-6">
+        <div className="mx-auto max-w-4xl space-y-4 text-center">
+          <h2 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+            FloodNet research dataset
           </h2>
-          <p className="text-base text-slate-600">
-            Compare each aerial image with its pixel-level annotation mask. Sample IDs are dataset identifiers; this project does not provide verified locations for these images.
+          <p className="text-sm leading-relaxed text-slate-600">
+            {FLOODNET_DATASET_DESCRIPTION}
           </p>
-        </div>
-
-        {/* Reconnaissance Pass Switcher Tabs */}
-        <div className="flex flex-wrap justify-center gap-2 mb-8 font-mono text-xs">
-          {(['10169', '10815', '6423'] as const).map((id) => (
-            <button
-              key={id}
-              onClick={() => setSelectedWalkthrough(id)}
-              className={`px-4 py-2 rounded-lg transition-colors border ${
-                selectedWalkthrough === id
-                  ? 'bg-cyan-600 text-white font-semibold border-cyan-600 shadow-xs'
-                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-              }`}
-            >
-              Image {id}
-            </button>
-          ))}
-        </div>
-
-        {/* Combined Dashboard & Walkthrough Container */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* Main Inspection & Walkthrough Q&A View */}
-          <div className="lg:col-span-8 bg-white border border-slate-200 rounded-xl p-5 space-y-5 shadow-sm">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200 text-xs font-mono">
-              <div className="flex items-center space-x-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-600" />
-                <span className="text-slate-900 font-semibold">{activeWalkthrough.title}</span>
-              </div>
-              <span className="text-[10px] text-cyan-700 px-2 py-0.5 bg-cyan-50 border border-cyan-200 rounded font-semibold">
-                DATASET IMAGE
-              </span>
-            </div>
-
-            {/* Mask Viewer Component */}
-            <div className="rounded-lg overflow-hidden border border-slate-200">
-              <MaskViewer
-                sampleId={String(selectedWalkthrough)}
-                rawImageUrl={activeWalkthrough.image}
-                maskImageUrl={activeWalkthrough.mask}
-              />
-            </div>
-
-            <div className="text-[11px] font-mono text-slate-500">
-            Compare the source aerial image with its dataset annotation mask.
-            </div>
-
-            <p className="text-xs font-sans text-slate-600 leading-relaxed border-t border-slate-200 pt-3">
-            {activeWalkthrough.scene} The caption describes visible content only; it does not identify a real-world location or confirm flood impact.
-            </p>
-          </div>
-
-          {/* Dataset description */}
-          <div className="lg:col-span-4 space-y-6">
-            <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-            <h3 className="text-sm font-bold text-slate-900 mb-3">About the FloodNet dataset</h3>
-            <p className="text-xs text-slate-600 leading-relaxed">{FLOODNET_DATASET_DESCRIPTION}</p>
-            <p className="text-xs text-slate-600 leading-relaxed mt-3">
-              Classes: {FLOODNET_CLASS_NAMES.join(', ')}.
-            </p>
-            <p className="text-[11px] text-slate-500 leading-relaxed mt-3">
-              Reference: Rahnemoonfar et al., “FloodNet: A High Resolution Aerial Imagery Dataset
-              for Post Flood Scene Understanding” (2020).
-            </p>
-
-            <Link
-              href="/signin"
-                className="w-full py-2.5 bg-cyan-600 hover:bg-cyan-700 text-white font-medium text-xs font-mono rounded-lg flex items-center justify-center space-x-2 transition-colors shadow-xs"
-              >
-                <span>Analyze an image in Studio</span>
-                <ArrowRight className="w-4 h-4" />
-              </Link>
-            </div>
-          </div>
+          <p className="text-xs leading-relaxed text-slate-500">
+            Semantic classes: {FLOODNET_CLASS_NAMES.join(', ')}. We are not showing sample
+            segmentation overlays here until each image and prediction can be verified together.
+          </p>
+          <Link
+            href="/signin"
+            className="inline-flex items-center gap-2 rounded-lg bg-cyan-600 px-4 py-2.5 text-xs font-medium text-white shadow-xs transition-colors hover:bg-cyan-700"
+          >
+            <span>Analyze your image in Studio</span>
+            <ArrowRight className="h-4 w-4" />
+          </Link>
         </div>
       </section>
 
@@ -409,7 +330,7 @@ export default function LandingPage() {
             </div>
             <ul className="space-y-1.5 text-[11px]">
               <li><a href="#capabilities-workflow" className="hover:text-cyan-700">Capabilities &amp; Workflow</a></li>
-              <li><a href="#dashboard-walkthrough" className="hover:text-cyan-700">Dashboard &amp; Walkthrough</a></li>
+              <li><a href="#dataset" className="hover:text-cyan-700">FloodNet dataset</a></li>
             </ul>
           </div>
 

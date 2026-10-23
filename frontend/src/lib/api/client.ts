@@ -40,9 +40,10 @@ export interface ModelInfo {
   id: 'segformer' | 'classical' | 'sam' | 'ground_truth' | string;
   name: string;
   description: string;
-  mIoU: number;
-  macro_f1: number;
+  mIoU: number | null;
+  macro_f1: number | null;
   latency_ms: number | null;
+  metrics_status?: string;
   recommended: boolean;
 }
 
@@ -164,7 +165,7 @@ export interface GalleryItem {
   date: string;
   severity_score: number;
   severity_level: 'LOW' | 'MODERATE' | 'CRITICAL' | 'CATASTROPHIC';
-  inundated_area_m2: number;
+  inundated_pixel_count: number | null;
   raw_url: string;
 }
 
@@ -247,7 +248,16 @@ export class ApiService {
       .eq('id', authUser.id)
       .maybeSingle();
     if (error) throw error;
-    return this.mapProfile(data as ProfileRow | null, authUser);
+    const profile = this.mapProfile(data as ProfileRow | null, authUser);
+    const avatarPath = authUser.user_metadata?.avatar_path;
+    if (typeof avatarPath === 'string' && avatarPath.startsWith(`${authUser.id}/profile/`)) {
+      const { data: avatar, error: avatarError } = await getSupabaseClient()
+        .storage.from('flood-imagery')
+        .createSignedUrl(avatarPath, 60 * 60);
+      if (avatarError) throw avatarError;
+      profile.avatar_url = avatar.signedUrl;
+    }
+    return profile;
   }
 
   private async resolveStorageUrl(path: string | null): Promise<string | undefined> {
@@ -483,6 +493,66 @@ export class ApiService {
     const { data, error } = await getSupabaseClient().auth.getUser();
     if (error) throw error;
     if (!data.user) return null;
+    return this.readProfile(data.user);
+  }
+
+  async uploadProfileAvatar(file: File): Promise<User> {
+    const user = await this.requireUser();
+    const extensions: Record<string, string> = {
+      'image/jpeg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp',
+    };
+    const extension = extensions[file.type];
+    if (!extension) {
+      throw new Error('Choose a JPEG, PNG, or WebP image for your profile photo.');
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      throw new Error('Profile photos must be 5 MB or smaller.');
+    }
+
+    const client = getSupabaseClient();
+    const previousPath = user.user_metadata?.avatar_path;
+    const avatarPath = `${user.id}/profile/${crypto.randomUUID()}.${extension}`;
+    const { error: uploadError } = await client.storage
+      .from('flood-imagery')
+      .upload(avatarPath, file, {
+        contentType: file.type,
+        upsert: false,
+      });
+    if (uploadError) throw uploadError;
+
+    const { data, error: updateError } = await client.auth.updateUser({
+      data: { avatar_path: avatarPath },
+    });
+    if (updateError) {
+      const { error: cleanupError } = await client.storage
+        .from('flood-imagery')
+        .remove([avatarPath]);
+      if (cleanupError) {
+        throw new Error(
+          `${updateError.message} The uploaded profile image could not be cleaned up: ${cleanupError.message}`,
+        );
+      }
+      throw updateError;
+    }
+    if (!data.user) throw new Error('Supabase did not return the updated user.');
+
+    if (
+      typeof previousPath === 'string' &&
+      previousPath !== avatarPath &&
+      previousPath.startsWith(`${user.id}/profile/`)
+    ) {
+      const { error: cleanupError } = await client.storage
+        .from('flood-imagery')
+        .remove([previousPath]);
+      if (cleanupError) {
+        throw new Error(
+          `Profile photo updated, but the previous photo could not be removed: ${cleanupError.message}`,
+        );
+      }
+    }
+
     return this.readProfile(data.user);
   }
 
@@ -804,7 +874,7 @@ export class ApiService {
         const stats = (row.damage_stats || {}) as {
           severity_score?: number;
           severity_level?: GalleryItem['severity_level'];
-          total_inundated_area_m2?: number;
+          total_inundated_pixels?: number;
         };
         return {
           id: row.id,
@@ -815,7 +885,9 @@ export class ApiService {
           date: new Date(row.created_at).toLocaleDateString(),
           severity_score: Number(stats.severity_score) || 0,
           severity_level: stats.severity_level || thread.severity || 'LOW',
-          inundated_area_m2: Number(stats.total_inundated_area_m2) || 0,
+          inundated_pixel_count: Number.isFinite(Number(stats.total_inundated_pixels))
+            ? Number(stats.total_inundated_pixels)
+            : null,
           raw_url: (await this.resolveStorageUrl(row.raw_image_url)) || '',
         };
       }),

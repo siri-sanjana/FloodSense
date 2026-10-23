@@ -1,0 +1,2 @@
+# Optional model for DeepLabV3+ experiments; base app requirements remain unchanged.
+segmentation-models-pytorch==0.5.0

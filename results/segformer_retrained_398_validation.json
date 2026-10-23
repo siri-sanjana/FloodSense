@@ -1,0 +1,26 @@
+{
+  "model": "SegFormer-B3 fine-tuned from existing FloodNet checkpoint",
+  "checkpoint": "checkpoints/segformer_retrained_398/segformer_best.pt",
+  "evaluation_split": "official FloodNet validation",
+  "validation_image_count": 450,
+  "evaluation_device": "mps",
+  "evaluation_seconds": 87.66,
+  "ignored_unknown_ground_truth_pixels": 1748019,
+  "unknown_mask_policy": "exact documented RGB palette; all other colors ignored (255)",
+  "mIoU": 0.5439974353219258,
+  "macro_f1": 0.6628448086853445,
+  "overall_pixel_accuracy": 0.8632598591764472,
+  "per_class_iou": {
+    "Background": 0.004949544608603107,
+    "Building-Flooded": 0.35066871634721664,
+    "Building-Non-Flooded": 0.7670518931683685,
+    "Road-Flooded": 0.3696629027695413,
+    "Road-Non-Flooded": 0.7857839073904673,
+    "Water": 0.6681007577189305,
+    "Tree": 0.7472275421659845,
+    "Vehicle": 0.3889942291838417,
+    "Pool": 0.516663129598189,
+    "Grass": 0.8408717302681141
+  },
+  "test_metrics_available": false
+}

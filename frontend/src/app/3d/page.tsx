@@ -27,9 +27,14 @@ import { FloodDigitalTwin3D, ClassStats } from '../../components/three/FloodDigi
 import { ImageSegmentationRelief3D } from '../../components/three/ImageSegmentationRelief3D';
 import { MaskViewer } from '../../components/MaskViewer';
 import { api } from '../../lib/api';
+import {
+  FLOODNET_SAMPLES,
+  loadFloodNetSampleImage,
+  type FloodNetSampleId,
+} from '../../lib/floodnet-samples';
 
 export default function Standalone3DDigitalTwinPage() {
-  const [selectedSector, setSelectedSector] = useState<'10169' | '10815' | '6423'>('10169');
+  const [selectedSector, setSelectedSector] = useState<FloodNetSampleId>('10169');
   const [activeView, setActiveView] = useState<'3d' | 'swipe' | 'image3d'>('3d');
   const [currentWaterLevel, setCurrentWaterLevel] = useState<number>(1.8);
   const [segmentationModel, setSegmentationModel] = useState<'segformer' | 'classical' | 'sam'>('segformer');
@@ -48,50 +53,41 @@ export default function Standalone3DDigitalTwinPage() {
   const [classStats, setClassStats] = useState<ClassStats>({
     floodedBuildings: 7,
     totalBuildings: 12,
-    floodedRoadsKm: 2.1,
-    totalRoadsKm: 4.6,
+    floodedRoadUnits: 2.1,
+    totalRoadUnits: 4.6,
     floodedVehicles: 4,
     totalVehicles: 8,
-    inundatedAreaHa: 3.82,
+    simulatedAreaUnits: 3.82,
     severityLevel: 'CRITICAL',
   });
 
   const SECTORS = [
     {
-      id: '10169',
-      title: 'Sector 10169: Marine Drive & Canal Axis',
+      ...FLOODNET_SAMPLES['10169'],
       waterBaseline: 1.8,
-      basinType: 'Coastal Estuarine Basin',
+      basinType: FLOODNET_SAMPLES['10169'].scene,
       structuresCount: 16,
-      safeCorridor: 'Western Ridge (+1.5m Elevation)',
+      safeCorridor: 'Illustrative route',
       criticalThreshold: 1.2,
-      description: 'High-density residential and commercial zone flanked by municipal canal and tidal estuary.',
-      image: '/samples/10169.jpg',
-      mask: '/samples/10169_mask.png',
+      description: 'Scene caption only; no verified location or flood measurements are supplied.',
     },
     {
-      id: '10815',
-      title: 'Sector 10815: North Dyke Canal Breach',
+      ...FLOODNET_SAMPLES['10815'],
       waterBaseline: 2.3,
-      basinType: 'Riverine Lowlands',
+      basinType: FLOODNET_SAMPLES['10815'].scene,
       structuresCount: 21,
-      safeCorridor: 'Highland Bypass (+2.1m Elevation)',
+      safeCorridor: 'Illustrative route',
       criticalThreshold: 1.4,
-      description: 'Major agricultural drainage corridor with embankment breach submerging access roads.',
-      image: '/samples/10815.jpg',
-      mask: '/samples/10815_mask.png',
+      description: 'Scene caption only; no verified location or flood measurements are supplied.',
     },
     {
-      id: '6423',
-      title: 'Sector 6423: Highway Overpass & Bridge Embankment',
+      ...FLOODNET_SAMPLES['6423'],
       waterBaseline: 1.1,
-      basinType: 'Alluvial Floodplain',
+      basinType: FLOODNET_SAMPLES['6423'].scene,
       structuresCount: 9,
-      safeCorridor: 'Northern Arterial Flyover',
+      safeCorridor: 'Illustrative route',
       criticalThreshold: 0.9,
-      description: 'Critical transport lifeline with multi-span bridge overpass and low-lying storage facilities.',
-      image: '/samples/6423.jpg',
-      mask: '/samples/6423_mask.png',
+      description: 'Scene caption only; no verified location or flood measurements are supplied.',
     },
   ];
 
@@ -125,9 +121,8 @@ export default function Standalone3DDigitalTwinPage() {
     setImage3dError(null);
     setIsBuildingImage3d(true);
     try {
-      const input = uploadedImage
-        ? { image: uploadedImage }
-        : { sample_id: selectedSector };
+      const image = uploadedImage || await loadFloodNetSampleImage(selectedSector);
+      const input = { image };
       const segmentation = await api.segment({ ...input, model: segmentationModel });
       setDerivedAssets({
         imageUrl: selectedImageUrl,
@@ -145,18 +140,18 @@ export default function Standalone3DDigitalTwinPage() {
     }
   };
 
-  // The 10 FloodNet segmentation classes
+  // FloodNet's ten semantic classes, with no scene-specific object counts.
   const CLASS_SCHEMA = [
-    { id: 1, name: 'Building-Flooded', color: '#DC2626', desc: 'Structural footprints with water ingress past foundation', count: `${classStats.floodedBuildings} active` },
-    { id: 2, name: 'Building-Safe', color: '#94A3B8', desc: 'Highland residential and clinic footprints above crest', count: `${classStats.totalBuildings - classStats.floodedBuildings} safe` },
-    { id: 3, name: 'Road-Flooded', color: '#CA8A04', desc: 'Submerged lowland arterial segments (>0.2m depth)', count: `${classStats.floodedRoadsKm} km` },
-    { id: 4, name: 'Road-Safe', color: '#475569', desc: 'Elevated highway overpass and dry escape corridors', count: `${(classStats.totalRoadsKm - classStats.floodedRoadsKm).toFixed(1)} km` },
-    { id: 5, name: 'Water Body / Flood Mesh', color: '#0284C7', desc: 'Active volumetric reflective inundation layer', count: `${classStats.inundatedAreaHa} ha` },
-    { id: 6, name: 'Tree Canopy / Vegetation', color: '#059669', desc: 'Natural forest buffers, roadside palms, and mangrove stands', count: '11 stands' },
-    { id: 7, name: 'Vehicle / Vessel', color: '#7C3AED', desc: 'Trapped lowland delivery vans and civilian automobiles', count: `${classStats.floodedVehicles} submerged` },
-    { id: 8, name: 'Retention Pool / Basin', color: '#06B6D4', desc: 'Constructed stormwater sumps and containment basins', count: '1 pool' },
-    { id: 9, name: 'Open Grassland', color: '#4ADE80', desc: 'Porous meadow buffers and permeable soil plains', count: 'Terrain base' },
-    { id: 10, name: 'Hydraulic Infrastructure', color: '#64748B', desc: 'Dikes, levees, bridge abutments, and canal gates', count: 'Piers & levees' },
+    { id: 0, name: 'Background', color: '#374151', desc: 'Background / unassigned scene pixels', count: 'Class 0' },
+    { id: 1, name: 'Building-Flooded', color: '#DC2626', desc: 'Flooded-building annotation class', count: 'Class 1' },
+    { id: 2, name: 'Building-Non-Flooded', color: '#B47878', desc: 'Non-flooded-building annotation class', count: 'Class 2' },
+    { id: 3, name: 'Road-Flooded', color: '#CA8A04', desc: 'Flooded-road annotation class', count: 'Class 3' },
+    { id: 4, name: 'Road-Non-Flooded', color: '#8C8C8C', desc: 'Non-flooded-road annotation class', count: 'Class 4' },
+    { id: 5, name: 'Water', color: '#0284C7', desc: 'Water annotation class', count: 'Class 5' },
+    { id: 6, name: 'Tree', color: '#059669', desc: 'Tree annotation class', count: 'Class 6' },
+    { id: 7, name: 'Vehicle', color: '#7C3AED', desc: 'Vehicle annotation class', count: 'Class 7' },
+    { id: 8, name: 'Pool', color: '#06B6D4', desc: 'Pool annotation class', count: 'Class 8' },
+    { id: 9, name: 'Grass', color: '#4ADE80', desc: 'Grass annotation class', count: 'Class 9' },
   ];
 
   return (
@@ -198,14 +193,17 @@ export default function Standalone3DDigitalTwinPage() {
       {/* ────────────────── SECTOR SELECTION & VIEW SWITCHER ────────────────── */}
       <div className="bg-white border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-4 font-mono text-xs">
+          <p className="basis-full text-[10px] text-slate-500">
+            FloodNet sample locations are not provided. Water levels, damage totals, and routes in this simulator are illustrative controls, not dataset measurements.
+          </p>
           {/* Active Sector Selection */}
           <div className="flex items-center space-x-3 overflow-x-auto pb-1 sm:pb-0">
-            <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Active Sector:</span>
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">FloodNet image:</span>
             {SECTORS.map((sec) => (
               <button
                 key={sec.id}
                 onClick={() => {
-                  setSelectedSector(sec.id as '10169' | '10815' | '6423');
+                  setSelectedSector(sec.id);
                   setCurrentWaterLevel(sec.waterBaseline);
                   setUploadedImage(null);
                   setDerivedAssets(null);
@@ -220,7 +218,7 @@ export default function Standalone3DDigitalTwinPage() {
                 }`}
               >
                 <span className={`w-2 h-2 rounded-full ${selectedSector === sec.id ? 'bg-cyan-600' : 'bg-slate-300'}`} />
-                <span>{sec.title.split(':')[0]}</span>
+                <span>Image {sec.id}</span>
               </button>
             ))}
           </div>
@@ -342,6 +340,11 @@ export default function Standalone3DDigitalTwinPage() {
               onSwitchToSwipe={() => setActiveView('swipe')}
               className="w-full"
             />
+            <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
+              Illustrative simulator only: terrain, buildings, roads, water level, severity,
+              and displayed counts are synthetic scenario values. They are not inferred from
+              the selected FloodNet image and are not verified measurements.
+            </p>
 
             {/* Quick Prompt to Swipe */}
             <div className="p-4 bg-white border border-cyan-200 rounded-xl flex items-center justify-between text-xs font-mono shadow-2xs">
@@ -391,7 +394,7 @@ export default function Standalone3DDigitalTwinPage() {
 
             <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 pt-1">
               <span>Move mouse or drag divider horizontally to swipe between raw drone capture and segmentation overlay.</span>
-              <span className="font-semibold text-cyan-800">10-Class Verified Overlay</span>
+              <span className="font-semibold text-cyan-800">FloodNet 10-Class Prediction Overlay</span>
             </div>
           </div>
         ) : derivedAssets ? (
@@ -447,7 +450,7 @@ export default function Standalone3DDigitalTwinPage() {
                     </span>
                   </div>
                   <div className="flex min-w-40 flex-1 items-center gap-3">
-                    <span className="whitespace-nowrap font-mono text-[10px] text-slate-400">-0.5m</span>
+                    <span className="whitespace-nowrap font-mono text-[10px] text-slate-400">-0.5 units</span>
                     <input
                       type="range"
                       min="-0.5"
@@ -456,31 +459,31 @@ export default function Standalone3DDigitalTwinPage() {
                       value={currentWaterLevel}
                       onChange={(event) => setCurrentWaterLevel(Number(event.target.value))}
                       aria-label="Simulated stage level"
-                      aria-valuetext={`${currentWaterLevel.toFixed(2)} meters simulated stage`}
+                      aria-valuetext={`${currentWaterLevel.toFixed(2)} synthetic scenario units`}
                       className="h-3 min-w-24 flex-1 cursor-pointer appearance-none rounded-full accent-cyan-600 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-700"
                       style={{
                         background: `linear-gradient(to right, #0891b2 0%, #0891b2 ${stagePosition}%, #e2e8f0 ${stagePosition}%, #e2e8f0 100%)`,
                       }}
                     />
-                    <span className="whitespace-nowrap font-mono text-[10px] text-slate-400">+3.5m</span>
+                    <span className="whitespace-nowrap font-mono text-[10px] text-slate-400">+3.5 units</span>
                   </div>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2 font-mono text-[11px]">
                   <div className="flex items-center gap-1.5">
-                    <span className="text-slate-400">INUNDATION:</span>
-                    <span className="font-bold text-slate-900">{classStats.inundatedAreaHa.toFixed(2)} Hectares</span>
+                    <span className="text-slate-400">SIMULATED AREA INDEX:</span>
+                    <span className="font-bold text-slate-900">{classStats.simulatedAreaUnits.toFixed(2)} arbitrary units</span>
                   </div>
                   <span className="hidden text-slate-300 sm:inline">&bull;</span>
                   <div className="flex items-center gap-1.5">
-                    <span className="text-slate-400">STRUCTURES:</span>
+                    <span className="text-slate-400">SYNTHETIC MODELS:</span>
                     <span className="font-bold text-red-600">
                       {classStats.floodedBuildings} Flooded / {classStats.totalBuildings} Total
                     </span>
                   </div>
                   <span className="hidden text-slate-300 sm:inline">&bull;</span>
                   <div className="flex items-center gap-1.5">
-                    <span className="text-slate-400">SEVERITY:</span>
+                    <span className="text-slate-400">SCENARIO THRESHOLD:</span>
                     <span className={`rounded px-2 py-0.5 text-[10px] font-bold ${severityColor}`}>
                       {classStats.severityLevel}
                     </span>
@@ -505,7 +508,7 @@ export default function Standalone3DDigitalTwinPage() {
               <span>10-CLASS SPATIAL SEGMENTATION BLOCKS</span>
             </div>
             <span className="text-[11px] font-mono text-slate-500">
-              Correlated with FloodNet Benchmark &amp; NDMA SOP Guidelines
+              FloodNet label schema; predictions are not a verified benchmark
             </span>
           </div>
 
@@ -544,10 +547,10 @@ export default function Standalone3DDigitalTwinPage() {
               CRITICAL FLOODING THRESHOLD
             </div>
             <div className="text-xl font-bold text-slate-900 font-sans">
-              +{activeSector.criticalThreshold.toFixed(2)}m Above MSL
+              +{activeSector.criticalThreshold.toFixed(2)} synthetic units
             </div>
             <p className="text-[11px] font-sans text-slate-600 leading-relaxed">
-              When water level exceeds this threshold, lowland road arteries are completely severed and residential sill isolation occurs.
+              This is a synthetic model threshold, not a measured elevation or an operational warning level.
             </p>
           </div>
 
@@ -559,19 +562,19 @@ export default function Standalone3DDigitalTwinPage() {
               {classStats.floodedBuildings} of {classStats.totalBuildings} Compromised
             </div>
             <p className="text-[11px] font-sans text-slate-600 leading-relaxed">
-              Real-time depth collision marks ground-floor ingress. Priority evacuation recommended via the {activeSector.safeCorridor}.
+              The displayed collision is simulated only. No evacuation route or response action is inferred or recommended.
             </p>
           </div>
 
           <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-2 shadow-xs">
             <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
-              FIELD ACTION READINESS
+              SIMULATOR STATUS
             </div>
             <div className="text-xl font-bold text-slate-900 font-sans">
-              Tier-2 Emergency Staging
+              Illustrative scenario only
             </div>
             <p className="text-[11px] font-sans text-slate-600 leading-relaxed">
-              Direct telemetry feeds into the FloodSense Chat Studio to generate automated SITREPs citing NDMA and NDRF protocols.
+              This synthetic scene does not feed measured telemetry or verified emergency guidance into reports.
             </p>
           </div>
         </div>

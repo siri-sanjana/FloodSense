@@ -115,17 +115,17 @@ def generate_docx_report(report_data: dict, output_path: str) -> str:
     p_triage.paragraph_format.space_after = Pt(12)
     
     # Section 2: Damage Assessment Metrics Table
-    h2 = doc.add_heading("2. Computer Vision Estimates (Not Ground-Truth Verified)", level=1)
+    h2 = doc.add_heading("2. Image-Mask Estimates (Not Ground-Truth Verified)", level=1)
     h2.runs[0].font.color.rgb = RGBColor(0x1E, 0x3A, 0x8A)
     
     dmg = rep.get("damage_assessment", {})
     dmg_data = [
-        ("Total Inundated Area (m²)", f"{dmg.get('total_flood_area_m2', 0.0):,.1f} sq. meters"),
-        ("Overall Sector Flood Coverage", f"{dmg.get('flood_coverage_pct', 0.0)}%"),
-        ("Flooded Building Structures", f"{dmg.get('flooded_buildings_count', 0)} units"),
-        ("Safe / Dry Buildings", f"{dmg.get('non_flooded_buildings_count', 0)} units"),
-        ("Road Inundation Percentage", f"{dmg.get('flooded_road_pct', 0.0)}%"),
-        ("Submerged / Trapped Vehicles", f"{dmg.get('submerged_vehicles_count', 0)} vehicles"),
+        ("Flood-class pixels", f"{dmg.get('total_flood_area_px', 0):,} pixels; not georeferenced"),
+        ("Flood-class image coverage", f"{dmg.get('flood_coverage_pct', 0.0)}%"),
+        ("Building-Flooded components", f"{dmg.get('flooded_buildings_count', 0)}; not verified object count"),
+        ("Building-Safe components", f"{dmg.get('non_flooded_buildings_count', 0)}; not verified object count"),
+        ("Road-Flooded class pixels", f"{dmg.get('flooded_road_pct', 0.0)}% of predicted Road pixels"),
+        ("Vehicle/Vessel-class components", f"{dmg.get('submerged_vehicles_count', 0)}; not verified detections"),
         ("Terrain & Environment Impact", str(dmg.get("vegetation_and_terrain_impact", "")))
     ]
     
@@ -134,7 +134,7 @@ def generate_docx_report(report_data: dict, output_path: str) -> str:
     
     hdr_cells = dmg_table.rows[0].cells
     hdr_cells[0].text = "QUANTITATIVE METRIC"
-    hdr_cells[1].text = "VERIFIED VALUE"
+    hdr_cells[1].text = "MODEL ESTIMATE"
     for cell in hdr_cells:
         set_cell_background(cell, "0F172A")
         for p in cell.paragraphs:
@@ -339,16 +339,16 @@ def generate_pdf_report(report_data: dict, output_path: str) -> str:
     elements.append(Paragraph(triage_txt, style_body))
     
     # 2. Damage Assessment Table
-    elements.append(Paragraph("2. Computer Vision Estimates (Not Ground-Truth Verified)", style_h1))
+    elements.append(Paragraph("2. Image-Mask Estimates (Not Ground-Truth Verified)", style_h1))
     dmg = rep.get("damage_assessment", {})
     dmg_rows = [
-        [Paragraph("<b>QUANTITATIVE METRIC</b>", style_table_hdr), Paragraph("<b>VERIFIED VALUE</b>", style_table_hdr)],
-        [Paragraph("Total Inundated Area (m²)", style_table_cell), Paragraph(f"{dmg.get('total_flood_area_m2', 0.0):,.1f} sq. meters", style_table_cell)],
-        [Paragraph("Overall Sector Flood Coverage", style_table_cell), Paragraph(f"{dmg.get('flood_coverage_pct', 0.0)}%", style_table_cell)],
-        [Paragraph("Flooded Building Structures", style_table_cell), Paragraph(f"{dmg.get('flooded_buildings_count', 0)} units", style_table_cell)],
-        [Paragraph("Safe / Dry Buildings", style_table_cell), Paragraph(f"{dmg.get('non_flooded_buildings_count', 0)} units", style_table_cell)],
-        [Paragraph("Road Inundation Percentage", style_table_cell), Paragraph(f"{dmg.get('flooded_road_pct', 0.0)}%", style_table_cell)],
-        [Paragraph("Submerged / Trapped Vehicles", style_table_cell), Paragraph(f"{dmg.get('submerged_vehicles_count', 0)} vehicles", style_table_cell)],
+        [Paragraph("<b>QUANTITATIVE METRIC</b>", style_table_hdr), Paragraph("<b>MODEL ESTIMATE</b>", style_table_hdr)],
+        [Paragraph("Flood-class pixels", style_table_cell), Paragraph(f"{dmg.get('total_flood_area_px', 0):,} pixels; not georeferenced", style_table_cell)],
+        [Paragraph("Flood-class image coverage", style_table_cell), Paragraph(f"{dmg.get('flood_coverage_pct', 0.0)}%", style_table_cell)],
+        [Paragraph("Building-Flooded components", style_table_cell), Paragraph(f"{dmg.get('flooded_buildings_count', 0)}; not verified object count", style_table_cell)],
+        [Paragraph("Building-Safe components", style_table_cell), Paragraph(f"{dmg.get('non_flooded_buildings_count', 0)}; not verified object count", style_table_cell)],
+        [Paragraph("Road-Flooded class pixels", style_table_cell), Paragraph(f"{dmg.get('flooded_road_pct', 0.0)}% of predicted Road pixels", style_table_cell)],
+        [Paragraph("Vehicle/Vessel-class components", style_table_cell), Paragraph(f"{dmg.get('submerged_vehicles_count', 0)}; not verified detections", style_table_cell)],
         [Paragraph("Terrain & Environment Impact", style_table_cell), Paragraph(str(dmg.get("vegetation_and_terrain_impact", "")), style_table_cell)]
     ]
     dmg_table = Table(dmg_rows, colWidths=[3.2*inch, 4.0*inch])

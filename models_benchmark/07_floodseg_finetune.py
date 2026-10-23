@@ -40,28 +40,16 @@ import timm
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "models_benchmark"))
-from utils.metrics import (
+from utils.metrics import (  # noqa: E402
     compute_multiclass_metrics,
     aggregate_multiclass_metrics,
     CLASS_NAMES_FLOODNET,
 )
+from utils.dataset_loader import IGNORE_INDEX, rgb_mask_to_class_ids  # noqa: E402
 
 # ── Constants ────────────────────────────────────────────────────────────────
 NUM_CLASSES = 10
 IMG_SIZE = 512
-
-COLOR_PALETTE = {
-    0: (0, 0, 0),
-    1: (255, 0, 0),
-    2: (180, 120, 120),
-    3: (160, 150, 20),
-    4: (140, 140, 140),
-    5: (61, 230, 250),
-    6: (0, 82, 255),
-    7: (255, 0, 245),
-    8: (255, 235, 0),
-    9: (4, 250, 7),
-}
 
 CLASS_NAMES = list(CLASS_NAMES_FLOODNET.values())
 
@@ -98,47 +86,37 @@ class FloodNetDataset(Dataset):
         return len(self.valid_pairs)
 
     def _rgb_to_class(self, mask_rgb):
-        class_mask = np.zeros(mask_rgb.shape[:2], dtype=np.int64)
-        for class_id, color in COLOR_PALETTE.items():
-            color_arr = np.array(color, dtype=np.uint8)
-            match = np.all(np.abs(mask_rgb.astype(int) - color_arr.astype(int)) <= 15, axis=-1)
-            class_mask[match] = class_id
-        return class_mask
+        return rgb_mask_to_class_ids(mask_rgb)
 
     def __getitem__(self, idx):
         img_file, mask_file = self.valid_pairs[idx]
-        try:
-            img = Image.open(self.img_dir / img_file).convert("RGB")
-            img = img.resize((self.img_size, self.img_size), Image.BILINEAR)
+        img = Image.open(self.img_dir / img_file).convert("RGB")
+        img = img.resize((self.img_size, self.img_size), Image.BILINEAR)
 
-            mask_img = Image.open(self.mask_dir / mask_file).convert("RGB")
-            mask_img = mask_img.resize((self.img_size, self.img_size), Image.NEAREST)
+        mask_img = Image.open(self.mask_dir / mask_file).convert("RGB")
+        mask_img = mask_img.resize((self.img_size, self.img_size), Image.NEAREST)
 
-            if self.augment:
-                # Random horizontal flip
-                if torch.rand(1) > 0.5:
-                    img = TF.hflip(img)
-                    mask_img = TF.hflip(mask_img)
-                # Random vertical flip
-                if torch.rand(1) > 0.5:
-                    img = TF.vflip(img)
-                    mask_img = TF.vflip(mask_img)
-                # Random rotation
-                angle = torch.randint(-15, 15, (1,)).item()
-                img = TF.rotate(img, angle)
-                mask_img = TF.rotate(mask_img, angle, interpolation=TF.InterpolationMode.NEAREST)
+        if self.augment:
+            if torch.rand(1) > 0.5:
+                img = TF.hflip(img)
+                mask_img = TF.hflip(mask_img)
+            if torch.rand(1) > 0.5:
+                img = TF.vflip(img)
+                mask_img = TF.vflip(mask_img)
+            angle = torch.randint(-15, 15, (1,)).item()
+            img = TF.rotate(img, angle)
+            mask_img = TF.rotate(
+                mask_img,
+                angle,
+                interpolation=TF.InterpolationMode.NEAREST,
+                fill=IGNORE_INDEX,
+            )
 
-            class_mask = self._rgb_to_class(np.array(mask_img))
-            pixel_values = self.img_transform(img)
-            labels = torch.tensor(class_mask, dtype=torch.long)
-            return pixel_values, labels, img_file
+        class_mask = self._rgb_to_class(np.array(mask_img))
+        pixel_values = self.img_transform(img)
+        labels = torch.tensor(class_mask, dtype=torch.long)
+        return pixel_values, labels, img_file
 
-        except Exception as e:
-            # Skip corrupted/unreadable image — return a zero tensor as placeholder
-            print(f"  [Dataset] WARNING: skipping {img_file} ({e})")
-            pixel_values = torch.zeros(3, self.img_size, self.img_size)
-            labels = torch.zeros(self.img_size, self.img_size, dtype=torch.long)
-            return pixel_values, labels, img_file
 
 
 # ── FloodSeg Architecture ─────────────────────────────────────────────────────
@@ -324,21 +302,38 @@ class DiceFocalLoss(nn.Module):
         self.focal_weight = 1.0 - dice_weight
 
     def focal_loss(self, logits, targets):
-        ce = F.cross_entropy(logits, targets, reduction="none")
+        valid = targets != IGNORE_INDEX
+        if not valid.any():
+            return logits.sum() * 0
+        ce = F.cross_entropy(
+            logits,
+            targets,
+            reduction="none",
+            ignore_index=IGNORE_INDEX,
+        )
         pt = torch.exp(-ce)
-        return (self.alpha * (1 - pt) ** self.gamma * ce).mean()
+        focal = self.alpha * (1 - pt) ** self.gamma * ce
+        return focal[valid].mean()
 
     def dice_loss(self, logits, targets):
+        valid = targets != IGNORE_INDEX
+        if not valid.any():
+            return logits.sum() * 0
         probs = F.softmax(logits, dim=1)
         target_one_hot = torch.zeros_like(probs)
-        target_one_hot.scatter_(1, targets.unsqueeze(1), 1)
+        safe_targets = targets.masked_fill(~valid, 0)
+        target_one_hot.scatter_(1, safe_targets.unsqueeze(1), 1)
+        valid_pixels = valid.unsqueeze(1)
+        target_one_hot *= valid_pixels
+        probs = probs * valid_pixels
         intersection = (probs * target_one_hot).sum(dim=(0, 2, 3))
         cardinality = (probs + target_one_hot).sum(dim=(0, 2, 3))
         return (1 - (2 * intersection + 1e-6) / (cardinality + 1e-6)).mean()
 
     def forward(self, logits, targets):
-        return self.focal_weight * self.focal_loss(logits, targets) + \
-               self.dice_weight * self.dice_loss(logits, targets)
+        return self.focal_weight * self.focal_loss(
+            logits, targets
+        ) + self.dice_weight * self.dice_loss(logits, targets)
 
 
 # ── Trainer ───────────────────────────────────────────────────────────────────

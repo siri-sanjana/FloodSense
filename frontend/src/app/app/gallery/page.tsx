@@ -36,7 +36,7 @@ export default function GalleryPage() {
             Reconnaissance Image History
           </h1>
           <p className="font-sans text-xs text-silt-400 mt-1">
-            Personal repository of aerial drone passes, orthomosaics, and computed flood tide levels.
+            Saved imagery and model-generated image statistics. Location and physical scale are only available when supplied and calibrated.
           </p>
         </div>
 
@@ -103,7 +103,7 @@ export default function GalleryPage() {
                   className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-500 ease-water"
                 />
                 <div className="absolute top-2 right-2 px-2 py-0.5 bg-abyss-950/90 hairline-all border-abyss-700 text-[10px] font-semibold text-[#D9822B]">
-                  TIDE {item.severity_score.toFixed(1)} &bull; {item.severity_level}
+                  MODEL PROXY {item.severity_score.toFixed(1)} &bull; {item.severity_level}
                 </div>
               </div>
 
@@ -120,7 +120,11 @@ export default function GalleryPage() {
                 </div>
 
                 <div className="pt-3 hairline-t border-abyss-800 flex items-center justify-between text-[11px] text-silt-400">
-                  <span>{item.inundated_area_m2.toLocaleString()} m² flooded</span>
+                  <span>
+                    {item.inundated_pixel_count === null
+                      ? 'Pixel count unavailable'
+                      : `${item.inundated_pixel_count.toLocaleString()} flooded pixels`}
+                  </span>
                   <div className="flex items-center space-x-1 text-silt-300 group-hover:text-[#D9822B] transition-colors">
                     <span>Inspect</span>
                     <ArrowUpRight className="w-3 h-3" />

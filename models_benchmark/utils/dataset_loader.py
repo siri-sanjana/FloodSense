@@ -19,6 +19,21 @@ COLOR_PALETTE = {
 
 # Flooded and Water class indices (Classes 1, 3, 5, 8)
 FLOODED_CLASS_IDS = [1, 3, 5, 8]
+IGNORE_INDEX = 255
+
+
+def rgb_mask_to_class_ids(mask_rgb):
+    """Decode only documented palette colors; preserve unknowns for safe handling."""
+    mask_rgb = np.asarray(mask_rgb)
+    if mask_rgb.ndim != 3 or mask_rgb.shape[2] != 3:
+        raise ValueError("FloodNet color masks must be RGB arrays.")
+
+    class_mask = np.full(mask_rgb.shape[:2], IGNORE_INDEX, dtype=np.uint8)
+    for class_id, (_, color) in COLOR_PALETTE.items():
+        class_mask[np.all(mask_rgb == np.asarray(color, dtype=np.uint8), axis=-1)] = (
+            class_id
+        )
+    return class_mask
 
 class FloodNetDatasetLoader:
     def __init__(self, root_dir="FloodNet", split="val", target_size=(512, 512)):
@@ -67,16 +82,12 @@ class FloodNetDatasetLoader:
             
         mask_rgb = np.array(mask_img)
         
-        # Convert RGB mask to class index mask
-        class_mask = np.zeros((mask_rgb.shape[0], mask_rgb.shape[1]), dtype=np.int64)
-        for class_id, (label, color) in COLOR_PALETTE.items():
-            color_arr = np.array(color, dtype=np.uint8)
-            match = np.all(np.abs(mask_rgb.astype(int) - color_arr.astype(int)) <= 15, axis=-1)
-            class_mask[match] = class_id
-            
+        class_mask = rgb_mask_to_class_ids(mask_rgb).astype(np.int64)
+
         if return_binary_flood:
             # Create binary mask where 1 = Flooded/Water, 0 = Background/Non-flooded
             binary_mask = np.zeros_like(class_mask, dtype=np.uint8)
+            binary_mask[class_mask == IGNORE_INDEX] = IGNORE_INDEX
             for flood_id in FLOODED_CLASS_IDS:
                 binary_mask[class_mask == flood_id] = 1
             return np.array(img), binary_mask, class_mask

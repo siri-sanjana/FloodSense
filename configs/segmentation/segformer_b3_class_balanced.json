@@ -1,0 +1,21 @@
+{
+  "model_name": "nvidia/mit-b3",
+  "dataset_root": "FloodNet",
+  "img_size": 512,
+  "epochs": 30,
+  "batch_size": 1,
+  "grad_accum_steps": 4,
+  "lr": 0.00006,
+  "loss_type": "dice_focal",
+  "class_weight_cap": 3.0,
+  "sampling_strategy": "class_balanced",
+  "init_checkpoint": "checkpoints/segformer_full/segformer_best.pt",
+  "seed": 42,
+  "deterministic": true,
+  "max_train_batches": 0,
+  "early_stopping_patience": 8,
+  "min_delta": 0.001,
+  "save_every": 30,
+  "checkpoint_dir": "checkpoints/segformer_b3_class_balanced",
+  "results_file": "results/segformer_b3_class_balanced.json"
+}

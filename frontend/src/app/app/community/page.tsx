@@ -9,6 +9,13 @@ export default function CommunityPage() {
   const [feed, setFeed] = useState<PublishedReport[]>([]);
   const [selectedRegion, setSelectedRegion] = useState('ALL');
   const [error, setError] = useState<string | null>(null);
+  const regions = Array.from(
+    new Set(
+      feed
+        .map((report) => report.location.split(',').at(-1)?.trim())
+        .filter((region): region is string => Boolean(region)),
+    ),
+  ).sort();
 
   useEffect(() => {
     api.getPublishedReports()
@@ -39,13 +46,13 @@ export default function CommunityPage() {
             Community Field SITREPs
           </h1>
           <p className="font-sans text-xs text-silt-400 mt-1">
-            Anonymized operational field reports published by verified responders, researchers, and civil observers.
+            Reports shared by community members. Author roles, locations, observations, and model outputs are not independently verified.
           </p>
         </div>
 
         <div className="flex items-center space-x-2 text-[10px]">
           <span className="text-silt-500">Filter:</span>
-          {['ALL', 'Kerala', 'Assam'].map((reg) => (
+          {['ALL', ...regions].map((reg) => (
             <button
               key={reg}
               onClick={() => setSelectedRegion(reg)}
@@ -74,7 +81,7 @@ export default function CommunityPage() {
               <div className="flex items-start justify-between">
                 <div className="space-y-1">
                   <div className="flex items-center space-x-2 text-[10px] text-silt-500">
-                    <span className="text-[#D9822B] font-semibold">TIDE {report.severity_score.toFixed(1)} &bull; {report.severity_level}</span>
+                    <span className="text-[#D9822B] font-semibold">MODEL PROXY {report.severity_score.toFixed(1)} &bull; {report.severity_level}</span>
                     <span>&bull;</span>
                     <span className="capitalize">Role: {report.author_role}</span>
                     <span>&bull;</span>
@@ -113,8 +120,8 @@ export default function CommunityPage() {
               </div>
 
               <div className="pt-3 hairline-t border-abyss-800 flex items-center justify-between text-[11px] text-silt-500">
-                <span>Verified with 10-Class SegFormer &amp; NDMA Guidelines</span>
-                <span>Community report &bull; published by an operator</span>
+                <span>Unverified community report &bull; image analysis is indicative only</span>
+                <span>Published by a community member</span>
               </div>
             </div>
           ))}

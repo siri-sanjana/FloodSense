@@ -17,6 +17,11 @@ import {
   HelpCircle
 } from 'lucide-react';
 import { api } from '../../lib/api';
+import {
+  FLOODNET_DATASET_DESCRIPTION,
+  FLOODNET_CLASS_NAMES,
+  FLOODNET_SAMPLES,
+} from '../../lib/floodnet-samples';
 import { FloodSenseLogo } from '../../components/ui/FloodSenseLogo';
 
 export default function AppWelcomePage() {
@@ -40,28 +45,13 @@ export default function AppWelcomePage() {
 
   const SAMPLE_INCIDENTS = [
     {
-      id: '10169',
-      title: 'Pass 10169: Kochi Residential Inundation',
-      location: 'Periyar River Basin, Kerala',
-      image: '/samples/10169.jpg',
-      severity: 'CRITICAL',
-      buildings: 16,
+      ...FLOODNET_SAMPLES['10169'],
     },
     {
-      id: '10815',
-      title: 'Pass 10815: Cuttack Canal Breach',
-      location: 'Mahanadi Basin Embankment, Odisha',
-      image: '/samples/10815.jpg',
-      severity: 'HIGH',
-      buildings: 21,
+      ...FLOODNET_SAMPLES['10815'],
     },
     {
-      id: '6423',
-      title: 'Pass 6423: Brahmaputra Riverine Causeway',
-      location: 'Assam Lowland Bridge Axis',
-      image: '/samples/6423.jpg',
-      severity: 'MODERATE',
-      buildings: 9,
+      ...FLOODNET_SAMPLES['6423'],
     },
   ];
 
@@ -71,8 +61,8 @@ export default function AppWelcomePage() {
     try {
       const thread = await api.createChat({
         title: sample.title,
-        location_tag: sample.location,
-        severity: sample.severity === 'CRITICAL' ? 'CRITICAL' : 'MODERATE',
+        location_tag: `FloodNet sample ${sample.id}; location not provided`,
+        severity: 'MODERATE',
       });
       router.push(`/app/chat/${thread.id}?sample_id=${sample.id}`);
     } catch (error) {
@@ -166,7 +156,7 @@ export default function AppWelcomePage() {
             Start Flood Assessment
           </h1>
           <p className="font-sans text-sm text-slate-600 max-w-xl mx-auto leading-relaxed">
-            Upload aerial drone imagery to run verified segmentation, detect affected structures,
+          Upload aerial imagery to run segmentation, inspect scene classes,
             and inspect flood boundaries in conversational natural language.
           </p>
         </div>
@@ -317,9 +307,12 @@ export default function AppWelcomePage() {
         {/* Preloaded Incidents */}
         <div className="space-y-3">
           <div className="flex items-center justify-between text-xs text-slate-600">
-            <span className="uppercase tracking-wider text-[10px] font-semibold">Or Inspect Preloaded Passes:</span>
-            <span className="text-[10px] text-cyan-700 font-medium">BENCHMARK DATASETS</span>
+            <span className="uppercase tracking-wider text-[10px] font-semibold">FloodNet sample images:</span>
+            <span className="text-[10px] text-cyan-700 font-medium">RESEARCH DATASET</span>
           </div>
+          <p className="text-[11px] leading-relaxed text-slate-600">
+            {FLOODNET_DATASET_DESCRIPTION} Classes: {FLOODNET_CLASS_NAMES.join(', ')}.
+          </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {SAMPLE_INCIDENTS.map((inc) => (
@@ -336,24 +329,13 @@ export default function AppWelcomePage() {
                     alt={inc.title}
                     className="w-full h-full object-cover group-hover:scale-102 transition-transform duration-200"
                   />
-                  <span
-                    className={`absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded text-[9px] font-bold ${
-                      inc.severity === 'CRITICAL'
-                        ? 'bg-red-600 text-white'
-                        : inc.severity === 'HIGH'
-                        ? 'bg-amber-600 text-white'
-                        : 'bg-cyan-600 text-white'
-                    }`}
-                  >
-                    {inc.severity}
-                  </span>
                 </div>
                 <div>
                   <div className="font-sans text-xs font-semibold text-slate-900 group-hover:text-cyan-700 truncate transition-colors">
                     {inc.title}
                   </div>
                   <div className="text-[10px] text-slate-500 truncate mt-0.5">
-                    {inc.location} &bull; {inc.buildings} buildings
+                    {inc.scene} &bull; Dataset ID {inc.id}
                   </div>
                 </div>
               </button>

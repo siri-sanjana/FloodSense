@@ -26,27 +26,22 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
 import timm
-from transformers import SegformerForSemanticSegmentation, SegformerConfig, SegformerImageProcessor
+from transformers import SegformerConfig, SegformerForSemanticSegmentation
 import torchvision.transforms as T
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "models_benchmark"))
-from utils.metrics import (
+from utils.metrics import (  # noqa: E402
     compute_multiclass_metrics,
     aggregate_multiclass_metrics,
     CLASS_NAMES_FLOODNET,
 )
+from utils.dataset_loader import rgb_mask_to_class_ids  # noqa: E402
 
 NUM_CLASSES = 10
 CLASS_NAMES = list(CLASS_NAMES_FLOODNET.values())
 ID2LABEL = {i: name for i, name in CLASS_NAMES_FLOODNET.items()}
 LABEL2ID = {name: i for i, name in ID2LABEL.items()}
-
-COLOR_PALETTE = {
-    0:(0,0,0), 1:(255,0,0), 2:(180,120,120), 3:(160,150,20),
-    4:(140,140,140), 5:(61,230,250), 6:(0,82,255), 7:(255,0,245),
-    8:(255,235,0), 9:(4,250,7)
-}
 
 MEAN = [0.485, 0.456, 0.406]
 STD  = [0.229, 0.224, 0.225]
@@ -71,11 +66,7 @@ class EvalDataset(Dataset):
         self.to_tensor = T.Compose([T.ToTensor(), T.Normalize(mean=MEAN, std=STD)])
 
     def _rgb_to_class(self, mask_rgb):
-        class_mask = np.zeros(mask_rgb.shape[:2], dtype=np.int64)
-        for cid, color in COLOR_PALETTE.items():
-            match = np.all(np.abs(mask_rgb.astype(int) - np.array(color)) <= 15, axis=-1)
-            class_mask[match] = cid
-        return class_mask
+        return rgb_mask_to_class_ids(mask_rgb)
 
     def __len__(self):
         return len(self.valid_pairs)

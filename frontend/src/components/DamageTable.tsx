@@ -11,40 +11,34 @@ export const DamageTable: React.FC<DamageTableProps> = ({ stats }) => {
   return (
     <div className="w-full bg-white border border-slate-200 rounded-xl overflow-hidden font-mono text-xs shadow-xs">
       {/* Top summary row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-slate-200 text-center">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-px bg-slate-200 text-center">
         <div className="bg-slate-50 p-3">
-          <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Inundated Area</div>
+          <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Flood-Class Pixels</div>
           <div className="text-sm font-bold text-slate-900 mt-0.5">
-            {stats.total_inundated_area_m2.toLocaleString()} m²
+            {stats.total_inundated_pixels.toLocaleString()} px
           </div>
         </div>
         <div className="bg-slate-50 p-3">
-          <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Flooded Buildings</div>
+          <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Building Class Components</div>
           <div className="text-sm font-bold text-red-600 mt-0.5">
             {stats.flooded_buildings_count} <span className="text-[10px] text-slate-500 font-normal">/ {stats.flooded_buildings_count + stats.safe_buildings_count}</span>
           </div>
         </div>
         <div className="bg-slate-50 p-3">
           <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
-            {stats.flooded_roads_coverage_pct != null ? 'Flooded Road Coverage' : 'Flooded Roads'}
+            {stats.flooded_roads_coverage_pct != null ? 'Road-Flooded Pixel Share' : 'Flooded Roads'}
           </div>
           <div className="text-sm font-bold text-amber-700 mt-0.5">
             {stats.flooded_roads_coverage_pct != null
               ? `${stats.flooded_roads_coverage_pct.toFixed(2)}%`
-              : stats.flooded_roads_km != null
-              ? `${stats.flooded_roads_km.toFixed(2)} km`
-              : 'Not available'}
-          </div>
-        </div>
-        <div className="bg-slate-50 p-3">
-          <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Est. Max Depth</div>
-          <div className="text-sm font-bold text-cyan-800 mt-0.5">
-            {stats.flood_depth_estimated_m != null
-              ? `${stats.flood_depth_estimated_m.toFixed(2)} m`
               : 'Not available'}
           </div>
         </div>
       </div>
+      <p className="bg-amber-50 px-3 py-2 text-[10px] text-amber-900">
+        Coverage and component counts come from predicted image pixels. They are not
+        georeferenced area, calibrated flood depth, or verified incident severity.
+      </p>
 
       {/* Class breakdown table */}
       <div className="overflow-x-auto">
@@ -52,9 +46,9 @@ export const DamageTable: React.FC<DamageTableProps> = ({ stats }) => {
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200 text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
               <th className="py-2.5 px-3">Class Category</th>
-              <th className="py-2.5 px-3">Surface Area</th>
+              <th className="py-2.5 px-3">Pixel Count</th>
               <th className="py-2.5 px-3">Coverage</th>
-              <th className="py-2.5 px-3 text-right">Hazard Status</th>
+              <th className="py-2.5 px-3 text-right">Predicted Class Group</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 text-[11px]">
@@ -65,7 +59,7 @@ export const DamageTable: React.FC<DamageTableProps> = ({ stats }) => {
                   <span className="text-slate-800 font-medium">{cls.name}</span>
                 </td>
                 <td className="py-2 px-3 text-slate-600">
-                  {cls.area_m2 != null ? `${cls.area_m2.toLocaleString()} m²` : 'Not available'}
+                  {cls.pixel_count.toLocaleString()} px
                 </td>
                 <td className="py-2 px-3">
                   <div className="flex items-center space-x-2">
@@ -89,7 +83,7 @@ export const DamageTable: React.FC<DamageTableProps> = ({ stats }) => {
                         : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                     }`}
                   >
-                    {cls.is_flooded ? 'INUNDATED' : 'CLEAR'}
+                    {cls.is_flooded ? 'FLOOD-ASSOCIATED' : 'OTHER CLASS'}
                   </span>
                 </td>
               </tr>

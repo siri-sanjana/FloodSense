@@ -1,8 +1,8 @@
 """
 06_segformer_finetune.py
 ========================
-Fine-tunes SegFormer-B3 (nvidia/mit-b3) on the FloodNet dataset (10-class
-semantic segmentation). Runs on Apple Silicon MPS or CPU if CUDA unavailable.
+Fine-tunes SegFormer or optional SMP DeepLabV3+ on FloodNet's 10-class
+semantic segmentation task. Runs on CUDA, Apple Silicon MPS, or CPU.
 
 Training Setup:
   - Dataset  : Official FloodNet train split; official validation split for model selection
@@ -30,7 +30,7 @@ from PIL import Image, ImageEnhance
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from transformers import (
     SegformerImageProcessor,
     SegformerForSemanticSegmentation,
@@ -40,31 +40,30 @@ from transformers import (
 # Add project root to path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "models_benchmark"))
-from utils.metrics import (
+from utils.metrics import (  # noqa: E402
     CLASS_NAMES_FLOODNET,
+    metrics_from_confusion,
 )
+from utils.dataset_loader import IGNORE_INDEX, rgb_mask_to_class_ids  # noqa: E402
 
 # ── Constants ────────────────────────────────────────────────────────────────
 NUM_CLASSES = 10
 IMG_SIZE = 512
 
-# FloodNet RGB color palette (color mask -> class index)
-COLOR_PALETTE = {
-    0: (0, 0, 0),
-    1: (255, 0, 0),
-    2: (180, 120, 120),
-    3: (160, 150, 20),
-    4: (140, 140, 140),
-    5: (61, 230, 250),
-    6: (0, 82, 255),
-    7: (255, 0, 245),
-    8: (255, 235, 0),
-    9: (4, 250, 7),
-}
-
 CLASS_NAMES = list(CLASS_NAMES_FLOODNET.values())
 ID2LABEL = {i: name for i, name in CLASS_NAMES_FLOODNET.items()}
 LABEL2ID = {name: i for i, name in ID2LABEL.items()}
+
+
+def seed_everything(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    if hasattr(torch.backends, "cudnn"):
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 
 def resolve_dataset_sources(dataset_root, img_dir=None, mask_dir=None):
@@ -135,6 +134,7 @@ class FloodNetDataset(Dataset):
         self.valid_pairs = list(valid_pairs or [])
         self.cache = cache if cache is not None else {}
         self.skipped_pairs = []
+        self.unmapped_pixel_count = 0
 
         for img_dir, mask_dir in sources or []:
             img_dir = Path(img_dir)
@@ -166,6 +166,10 @@ class FloodNetDataset(Dataset):
                         continue
                     self.valid_pairs.append((img_path, mask_path))
 
+        self.unmapped_pixel_count = sum(
+            int(np.count_nonzero(self.cache[(img_path, mask_path)][1] == IGNORE_INDEX))
+            for img_path, mask_path in self.valid_pairs
+        )
         for skipped_pair in self.skipped_pairs:
             print(
                 f"[Dataset] Skipping unreadable pair "
@@ -183,15 +187,7 @@ class FloodNetDataset(Dataset):
         return len(self.valid_pairs)
 
     def _rgb_to_class(self, mask_rgb: np.ndarray) -> np.ndarray:
-        h, w = mask_rgb.shape[:2]
-        class_mask = np.zeros((h, w), dtype=np.int64)
-        for class_id, color in COLOR_PALETTE.items():
-            color_arr = np.array(color, dtype=np.uint8)
-            match = np.all(
-                np.abs(mask_rgb.astype(int) - color_arr.astype(int)) <= 15, axis=-1
-            )
-            class_mask[match] = class_id
-        return class_mask
+        return rgb_mask_to_class_ids(mask_rgb)
 
     def _load_pair(self, img_path, mask_path):
         with Image.open(img_path) as image_file:
@@ -231,7 +227,7 @@ class FloodNetDataset(Dataset):
             mask_img = mask_img.rotate(
                 angle,
                 resample=Image.Resampling.NEAREST,
-                fillcolor=0,
+                fillcolor=IGNORE_INDEX,
             )
             img = ImageEnhance.Brightness(img).enhance(random.uniform(0.9, 1.1))
             img = ImageEnhance.Contrast(img).enhance(random.uniform(0.9, 1.1))
@@ -242,6 +238,48 @@ class FloodNetDataset(Dataset):
         pixel_values = encoding["pixel_values"].squeeze(0)
         labels = torch.tensor(class_mask, dtype=torch.long)
         return pixel_values, labels, img_path.name
+
+
+class ImageNetImageProcessor:
+    def __init__(self):
+        self.mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+        self.std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+
+    def __call__(self, images, return_tensors="pt"):
+        image = np.asarray(images.convert("RGB"), dtype=np.float32) / 255.0
+        tensor = torch.from_numpy(image.transpose(2, 0, 1).copy())
+        tensor = (tensor - self.mean) / self.std
+        if return_tensors != "pt":
+            raise ValueError("ImageNetImageProcessor supports return_tensors='pt' only.")
+        return {"pixel_values": tensor.unsqueeze(0)}
+
+
+def get_image_processor(model_type, model_name):
+    if model_type == "segformer":
+        return SegformerImageProcessor.from_pretrained(
+            model_name,
+            do_resize=False,
+            do_rescale=True,
+            do_normalize=True,
+        )
+    if model_type == "deeplabv3plus":
+        return ImageNetImageProcessor()
+    raise ValueError(f"Unsupported segmentation model type: {model_type}")
+
+
+def get_model_logits(model, pixel_values, model_type):
+    outputs = (
+        model(pixel_values=pixel_values)
+        if model_type == "segformer"
+        else model(pixel_values)
+    )
+    if hasattr(outputs, "logits"):
+        return outputs.logits
+    if isinstance(outputs, dict) and "out" in outputs:
+        return outputs["out"]
+    if isinstance(outputs, torch.Tensor):
+        return outputs
+    raise TypeError("Segmentation model must return logits or an 'out' tensor.")
 
 
 # ── Loss: DiceFocalLoss ───────────────────────────────────────────────────────
@@ -270,18 +308,33 @@ class DiceFocalLoss(nn.Module):
         )
 
     def focal_loss(self, logits, targets):
-        ce = F.cross_entropy(logits, targets, reduction="none")
+        valid = targets != IGNORE_INDEX
+        if not valid.any():
+            return logits.sum() * 0
+        safe_targets = targets.masked_fill(~valid, 0)
+        ce = F.cross_entropy(
+            logits,
+            targets,
+            reduction="none",
+            ignore_index=IGNORE_INDEX,
+        )
         if self.class_weights is not None:
-            ce = ce * self.class_weights[targets]
+            ce = ce * self.class_weights[safe_targets]
         pt = torch.exp(-ce)
         focal = self.alpha * (1 - pt) ** self.gamma * ce
-        return focal.mean()
+        return focal[valid].mean()
 
     def dice_loss(self, logits, targets):
+        valid = targets != IGNORE_INDEX
+        if not valid.any():
+            return logits.sum() * 0
         probs = F.softmax(logits, dim=1)
-        N, C, H, W = probs.shape
         target_one_hot = torch.zeros_like(probs)
-        target_one_hot.scatter_(1, targets.unsqueeze(1), 1)
+        safe_targets = targets.masked_fill(~valid, 0)
+        target_one_hot.scatter_(1, safe_targets.unsqueeze(1), 1)
+        valid_pixels = valid.unsqueeze(1)
+        target_one_hot *= valid_pixels
+        probs = probs * valid_pixels
         intersection = (probs * target_one_hot).sum(dim=(0, 2, 3))
         cardinality = (probs + target_one_hot).sum(dim=(0, 2, 3))
         dice_per_class = 1 - (2 * intersection + 1e-6) / (cardinality + 1e-6)
@@ -294,6 +347,58 @@ class DiceFocalLoss(nn.Module):
         )
 
 
+def build_segmentation_loss(loss_type, class_weights=None):
+    if loss_type == "cross_entropy":
+        return nn.CrossEntropyLoss(ignore_index=IGNORE_INDEX)
+    if loss_type == "weighted_cross_entropy":
+        if class_weights is None:
+            raise ValueError(
+                "weighted_cross_entropy requires --class_weight_cap greater than 0."
+            )
+        return nn.CrossEntropyLoss(
+            weight=torch.as_tensor(class_weights, dtype=torch.float32),
+            ignore_index=IGNORE_INDEX,
+        )
+    if loss_type == "dice_focal":
+        return DiceFocalLoss(
+            num_classes=NUM_CLASSES,
+            class_weights=class_weights,
+        )
+    raise ValueError(f"Unsupported segmentation loss: {loss_type}")
+
+
+def build_class_balanced_sample_weights(dataset):
+    """Weight images by the inverse square root of their class-presence counts."""
+    class_image_counts = np.zeros(NUM_CLASSES, dtype=np.int64)
+    image_classes = []
+    for image_path, mask_path in dataset.valid_pairs:
+        class_mask = dataset.cache[(image_path, mask_path)][1]
+        present_classes = np.unique(class_mask)
+        present_classes = present_classes[
+            (present_classes >= 0) & (present_classes < NUM_CLASSES)
+        ]
+        image_classes.append(present_classes)
+        class_image_counts[present_classes] += 1
+
+    if not np.any(class_image_counts):
+        raise ValueError("Training annotations contain no recognized class pixels.")
+
+    inverse_sqrt_frequency = np.zeros(NUM_CLASSES, dtype=np.float64)
+    present = class_image_counts > 0
+    inverse_sqrt_frequency[present] = 1.0 / np.sqrt(class_image_counts[present])
+    sample_weights = np.asarray(
+        [inverse_sqrt_frequency[classes].mean() for classes in image_classes],
+        dtype=np.float64,
+    )
+    if not np.isfinite(sample_weights).all() or np.any(sample_weights <= 0):
+        raise ValueError("Unable to calculate valid class-balanced sample weights.")
+
+    return (
+        torch.as_tensor(sample_weights, dtype=torch.double),
+        class_image_counts.tolist(),
+    )
+
+
 # ── Trainer ───────────────────────────────────────────────────────────────────
 class SegFormerTrainer:
     def __init__(self, args):
@@ -301,6 +406,11 @@ class SegFormerTrainer:
             raise ValueError("--epochs must be at least 1.")
         if args.batch_size < 1:
             raise ValueError("--batch_size must be at least 1.")
+        if args.model_type == "deeplabv3plus" and args.batch_size < 2:
+            raise ValueError(
+                "DeepLabV3+ requires --batch_size of at least 2 because its "
+                "pooled decoder branch uses batch normalization."
+            )
         if args.grad_accum_steps < 1:
             raise ValueError("--grad_accum_steps must be at least 1.")
         if args.save_every < 1:
@@ -311,12 +421,22 @@ class SegFormerTrainer:
             raise ValueError("--lr must be greater than 0.")
         if args.class_weight_cap < 0:
             raise ValueError("--class_weight_cap cannot be negative.")
+        if args.sampling_strategy not in {"uniform", "class_balanced"}:
+            raise ValueError(
+                "--sampling_strategy must be 'uniform' or 'class_balanced'."
+            )
         if not 0 < args.val_fraction < 1:
             raise ValueError("--val_fraction must be between 0 and 1.")
         if args.min_delta < 0:
             raise ValueError("--min_delta cannot be negative.")
         if args.early_stopping_patience < 0:
             raise ValueError("--early_stopping_patience cannot be negative.")
+        if args.max_train_batches < 0:
+            raise ValueError("--max_train_batches cannot be negative.")
+        if args.loss_type == "weighted_cross_entropy" and args.class_weight_cap <= 0:
+            raise ValueError(
+                "weighted_cross_entropy requires --class_weight_cap greater than 0."
+            )
 
         self.args = args
         self.device = self._pick_device()
@@ -326,18 +446,24 @@ class SegFormerTrainer:
         if not self.ckpt_dir.is_absolute():
             self.ckpt_dir = PROJECT_ROOT / self.ckpt_dir
         self.ckpt_dir.mkdir(parents=True, exist_ok=True)
+        self.best_checkpoint_name = (
+            "segformer_best.pt"
+            if args.model_type == "segformer"
+            else "deeplabv3plus_best.pt"
+        )
+        self.best_checkpoint_path = self.ckpt_dir / self.best_checkpoint_name
         self.results_path = Path(args.results_file)
         if not self.results_path.is_absolute():
             self.results_path = PROJECT_ROOT / self.results_path
         self.results_path.parent.mkdir(parents=True, exist_ok=True)
 
-        random.seed(args.seed)
-        np.random.seed(args.seed)
-        torch.manual_seed(args.seed)
+        seed_everything(args.seed)
+        if args.deterministic:
+            torch.use_deterministic_algorithms(True, warn_only=True)
+        else:
+            torch.use_deterministic_algorithms(False)
 
-        self.processor = SegformerImageProcessor.from_pretrained(
-            args.model_name, do_resize=False, do_rescale=True, do_normalize=True
-        )
+        self.processor = get_image_processor(args.model_type, args.model_name)
 
         train_sources, validation_sources, self.split_strategy = resolve_dataset_sources(
             args.dataset_root,
@@ -392,11 +518,30 @@ class SegFormerTrainer:
             raise ValueError("At least two valid training image-mask pairs are required.")
         if len(val_ds) < 1:
             raise ValueError("At least one valid validation image-mask pair is required.")
+        self.class_image_counts = None
+        self.sample_weights = None
+        sampler = None
+        if args.sampling_strategy == "class_balanced":
+            self.sample_weights, self.class_image_counts = (
+                build_class_balanced_sample_weights(train_ds)
+            )
+            sampler = WeightedRandomSampler(
+                self.sample_weights,
+                num_samples=len(train_ds),
+                replacement=True,
+                generator=torch.Generator().manual_seed(args.seed),
+            )
         self.train_loader = DataLoader(
-            train_ds, batch_size=args.batch_size, shuffle=True, num_workers=0
+            train_ds,
+            batch_size=args.batch_size,
+            shuffle=sampler is None,
+            sampler=sampler,
+            num_workers=0,
         )
         self.val_loader = DataLoader(val_ds, batch_size=1, shuffle=False, num_workers=0)
         self.dataset_pair_count = len(train_ds) + len(val_ds)
+        self.train_unmapped_pixel_count = train_ds.unmapped_pixel_count
+        self.validation_unmapped_pixel_count = val_ds.unmapped_pixel_count
         print(
             f"[SegFormerTrainer] Split={self.split_strategy} | "
             f"Total={self.dataset_pair_count} | "
@@ -425,10 +570,15 @@ class SegFormerTrainer:
 
         class_weights = self._get_class_weights(
             train_ds,
-            max_weight=args.class_weight_cap,
+            max_weight=(
+                args.class_weight_cap
+                if args.loss_type != "cross_entropy"
+                else 0
+            ),
         )
-        self.criterion = DiceFocalLoss(
-            num_classes=NUM_CLASSES,
+        self.class_weights = class_weights
+        self.criterion = build_segmentation_loss(
+            args.loss_type,
             class_weights=class_weights,
         ).to(self.device)
         self.optimizer = torch.optim.AdamW(
@@ -443,10 +593,15 @@ class SegFormerTrainer:
             "val_mIoU": [],
             "val_pixel_acc": [],
             "epoch_times": [],
+            "epochs": [],
         }
+        self.model_parameter_count = sum(
+            parameter.numel() for parameter in self.model.parameters()
+        )
         self.best_miou = float("-inf")
         self.best_epoch = 0
         self.epochs_without_improvement = 0
+        self.training_start_time = None
 
     @staticmethod
     def _get_class_weights(dataset, max_weight):
@@ -461,6 +616,8 @@ class SegFormerTrainer:
                 minlength=NUM_CLASSES,
             )[:NUM_CLASSES]
 
+        if counts.sum() == 0:
+            raise ValueError("Training annotations contain no recognized class pixels.")
         present = counts > 0
         frequencies = counts[present] / counts.sum()
         reference_frequency = np.median(frequencies)
@@ -482,16 +639,39 @@ class SegFormerTrainer:
         return torch.device("cpu")
 
     def _build_model(self, model_name):
-        print(f"[SegFormerTrainer] Loading '{model_name}' ...")
-        config = SegformerConfig.from_pretrained(model_name)
-        config.num_labels = NUM_CLASSES
-        config.id2label = ID2LABEL
-        config.label2id = LABEL2ID
-        model = SegformerForSemanticSegmentation.from_pretrained(
-            model_name, config=config, ignore_mismatched_sizes=True
-        )
-        print(f"  Decode head re-initialised for {NUM_CLASSES} FloodNet classes.")
-        return model
+        if self.args.model_type == "segformer":
+            print(f"[SegFormerTrainer] Loading '{model_name}' ...")
+            config = SegformerConfig.from_pretrained(model_name)
+            config.num_labels = NUM_CLASSES
+            config.id2label = ID2LABEL
+            config.label2id = LABEL2ID
+            model = SegformerForSemanticSegmentation.from_pretrained(
+                model_name,
+                config=config,
+                ignore_mismatched_sizes=True,
+            )
+            print(f"  Decode head re-initialised for {NUM_CLASSES} FloodNet classes.")
+            return model
+        if self.args.model_type == "deeplabv3plus":
+            try:
+                import segmentation_models_pytorch as smp
+            except ImportError as exc:
+                raise ImportError(
+                    "DeepLabV3+ experiments require "
+                    "requirements-segmentation-experiments.txt."
+                ) from exc
+            print(
+                "[SegFormerTrainer] Building SMP DeepLabV3+ with "
+                f"{self.args.encoder_name} encoder initialized from "
+                f"{self.args.encoder_weights}."
+            )
+            return smp.DeepLabV3Plus(
+                encoder_name=self.args.encoder_name,
+                encoder_weights=self.args.encoder_weights,
+                in_channels=3,
+                classes=NUM_CLASSES,
+            )
+        raise ValueError(f"Unsupported segmentation model type: {self.args.model_type}")
 
     def _train_one_epoch(self, epoch):
         self.model.train()
@@ -500,28 +680,38 @@ class SegFormerTrainer:
         if accum_steps < 1:
             raise ValueError("--grad_accum_steps must be at least 1.")
         self.optimizer.zero_grad()
+        epoch_batches = (
+            min(self.args.max_train_batches, len(self.train_loader))
+            if self.args.max_train_batches
+            else len(self.train_loader)
+        )
         for i, (pixel_values, labels, _) in enumerate(self.train_loader):
+            if i >= epoch_batches:
+                break
             pixel_values = pixel_values.to(self.device)
             labels = labels.to(self.device)
 
-            outputs = self.model(pixel_values=pixel_values)
-            logits = outputs.logits
+            logits = get_model_logits(
+                self.model,
+                pixel_values,
+                self.args.model_type,
+            )
             upsampled = F.interpolate(logits, size=labels.shape[-2:],
                                       mode="bilinear", align_corners=False)
             loss = self.criterion(upsampled, labels)
             group_start = (i // accum_steps) * accum_steps
-            group_size = min(accum_steps, len(self.train_loader) - group_start)
+            group_size = min(accum_steps, epoch_batches - group_start)
             (loss / group_size).backward()
 
-            if (i + 1) % accum_steps == 0 or (i + 1) == len(self.train_loader):
+            if (i + 1) % accum_steps == 0 or (i + 1) == epoch_batches:
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                 self.optimizer.step()
                 self.optimizer.zero_grad()
 
             total_loss += loss.item()
             if (i + 1) % (40 * accum_steps) == 0:
-                print(f"  [{i+1}/{len(self.train_loader)}] loss={loss.item():.4f}")
-        return total_loss / len(self.train_loader)
+                print(f"  [{i+1}/{epoch_batches}] loss={loss.item():.4f}")
+        return total_loss / epoch_batches
 
     @torch.no_grad()
     def _validate(self):
@@ -529,86 +719,60 @@ class SegFormerTrainer:
         confusion = torch.zeros((NUM_CLASSES, NUM_CLASSES), dtype=torch.int64)
         for pixel_values, labels, _ in self.val_loader:
             pixel_values = pixel_values.to(self.device)
-            outputs = self.model(pixel_values=pixel_values)
-            logits = outputs.logits
+            logits = get_model_logits(
+                self.model,
+                pixel_values,
+                self.args.model_type,
+            )
             upsampled = F.interpolate(logits, size=labels.shape[-2:],
                                       mode="bilinear", align_corners=False).contiguous()
             pred = upsampled.argmax(dim=1).view(-1).cpu()
             gt = labels.view(-1).cpu()
+            valid = gt != IGNORE_INDEX
             batch_confusion = torch.bincount(
-                gt * NUM_CLASSES + pred, minlength=NUM_CLASSES**2
+                gt[valid] * NUM_CLASSES + pred[valid],
+                minlength=NUM_CLASSES**2,
             ).reshape(NUM_CLASSES, NUM_CLASSES)
             confusion += batch_confusion
 
-        confusion = confusion.numpy().astype(np.float64)
-        true_positive = np.diag(confusion)
-        gt_counts = confusion.sum(axis=1)
-        pred_counts = confusion.sum(axis=0)
-        unions = gt_counts + pred_counts - true_positive
-        valid_classes = unions > 0
-        ious = np.divide(
-            true_positive, unions, out=np.zeros_like(true_positive), where=valid_classes
+        metrics = metrics_from_confusion(
+            confusion.numpy(),
+            CLASS_NAMES_FLOODNET,
         )
-        f1_denominator = gt_counts + pred_counts
-        f1_scores = np.divide(
-            2 * true_positive,
-            f1_denominator,
-            out=np.zeros_like(true_positive),
-            where=f1_denominator > 0,
-        )
-        precisions = np.divide(
-            true_positive,
-            pred_counts,
-            out=np.zeros_like(true_positive),
-            where=pred_counts > 0,
-        )
-        recalls = np.divide(
-            true_positive,
-            gt_counts,
-            out=np.zeros_like(true_positive),
-            where=gt_counts > 0,
-        )
-        total_pixels = gt_counts.sum()
-        per_class = {}
-        for class_id, class_name in enumerate(CLASS_NAMES):
-            per_class[class_name] = {
-                "class_id": class_id,
-                "iou": float(ious[class_id]),
-                "f1_score": float(f1_scores[class_id]),
-                "precision": float(precisions[class_id]),
-                "recall": float(recalls[class_id]),
-                "gt_pixel_count": int(gt_counts[class_id]),
-                "pred_pixel_count": int(pred_counts[class_id]),
-            }
-
-        return {
-            "mIoU": float(ious[valid_classes].mean()) if valid_classes.any() else 0.0,
-            "macro_f1": float(f1_scores[valid_classes].mean()) if valid_classes.any() else 0.0,
-            "macro_precision": float(precisions[valid_classes].mean()) if valid_classes.any() else 0.0,
-            "macro_recall": float(recalls[valid_classes].mean()) if valid_classes.any() else 0.0,
-            "frequency_weighted_iou": (
-                float(np.sum(ious * gt_counts) / total_pixels) if total_pixels else 0.0
-            ),
-            "overall_pixel_accuracy": (
-                float(true_positive.sum() / total_pixels) if total_pixels else 0.0
-            ),
-            "per_class": per_class,
-        }
+        return metrics
 
     def _save_checkpoint(self, epoch, miou, is_best=False):
-        path = self.ckpt_dir / f"segformer_ep{epoch:03d}_miou{miou:.4f}.pt"
-        torch.save({"epoch": epoch, "model_state_dict": self.model.state_dict(), "miou": miou}, path)
+        if epoch % self.args.save_every == 0:
+            path = self.ckpt_dir / (
+                f"{self.args.model_type}_ep{epoch:03d}_miou{miou:.4f}.pt"
+            )
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "model_state_dict": self.model.state_dict(),
+                    "miou": miou,
+                },
+                path,
+            )
         if is_best:
-            torch.save(self.model.state_dict(), self.ckpt_dir / "segformer_best.pt")
+            best_path = self.best_checkpoint_path
+            temporary_path = best_path.with_suffix(".pt.tmp")
+            torch.save(self.model.state_dict(), temporary_path)
+            temporary_path.replace(best_path)
             print(f"  ★ Best mIoU={miou:.4f} checkpoint saved")
 
     def train(self):
         print("\n" + "=" * 60)
-        print("  SegFormer Fine-Tuning on FloodNet (10 classes)")
+        print(
+            f"  SegFormer Fine-Tuning on FloodNet "
+            f"({self.args.model_name}, {self.args.loss_type})"
+        )
         print("=" * 60)
+        self.training_start_time = time.perf_counter()
 
         for epoch in range(1, self.args.epochs + 1):
             t0 = time.time()
+            learning_rate = self.optimizer.param_groups[0]["lr"]
             train_loss = self._train_one_epoch(epoch)
             self.scheduler.step()
             val_m = self._validate()
@@ -626,6 +790,15 @@ class SegFormerTrainer:
             self.history["val_mIoU"].append(round(val_m["mIoU"], 4))
             self.history["val_pixel_acc"].append(round(val_m["overall_pixel_accuracy"], 4))
             self.history["epoch_times"].append(round(elapsed, 2))
+            self.history["epochs"].append(
+                {
+                    "epoch": epoch,
+                    "train_loss": train_loss,
+                    "validation_metrics": val_m,
+                    "learning_rate": learning_rate,
+                    "runtime_seconds": elapsed,
+                }
+            )
 
             if epoch % self.args.save_every == 0 or is_best:
                 self._save_checkpoint(epoch, val_m["mIoU"], is_best)
@@ -657,18 +830,63 @@ class SegFormerTrainer:
         return self._save_results()
 
     def _save_results(self):
-        best_checkpoint = self.ckpt_dir / "segformer_best.pt"
+        best_checkpoint = self.best_checkpoint_path
         if not best_checkpoint.is_file():
             raise RuntimeError("Training did not produce a best-model checkpoint.")
         self.model.load_state_dict(
             torch.load(best_checkpoint, map_location=self.device, weights_only=True)
         )
         final = self._validate()
+        total_training_seconds = (
+            time.perf_counter() - self.training_start_time
+            if self.training_start_time is not None
+            else None
+        )
+        model_name = self.args.model_name
+        if self.args.model_type == "deeplabv3plus":
+            architecture = (
+                f"DeepLabV3Plus/{self.args.encoder_name}"
+            )
+            pretrained_initialization = (
+                f"segmentation-models-pytorch {self.args.encoder_name} "
+                f"encoder_weights={self.args.encoder_weights}"
+            )
+        else:
+            architecture = model_name.rsplit("/", 1)[-1]
+            pretrained_initialization = model_name
+        if self.args.max_train_batches:
+            run_type = "smoke_test"
+        else:
+            run_type = "full_training"
         output = {
-            "model": "SegFormer-B3 (Fine-tuned on FloodNet)",
+            "model": f"{architecture} fine-tuned on FloodNet",
+            "architecture": architecture,
+            "model_type": self.args.model_type,
+            "pretrained_initialization": pretrained_initialization,
+            "initialization_checkpoint": self.args.init_checkpoint,
+            "checkpoint": str(best_checkpoint),
+            "run_type": run_type,
             "epochs_trained": len(self.history["train_loss"]),
             "best_epoch": self.best_epoch,
             "best_val_mIoU": round(self.best_miou, 4),
+            "training_seconds": total_training_seconds,
+            "device": str(self.device),
+            "parameter_count": self.model_parameter_count,
+            "mps_allocated_bytes_after_training": (
+                torch.mps.current_allocated_memory()
+                if self.device.type == "mps"
+                else None
+            ),
+            "mps_driver_allocated_bytes_after_training": (
+                torch.mps.driver_allocated_memory()
+                if self.device.type == "mps"
+                else None
+            ),
+            "validation_metric_scope": (
+                "Official validation split used for model selection; not an "
+                "independent test result."
+            ),
+            "test_metrics_available": False,
             "final_val_metrics": {
                 "mIoU": round(final["mIoU"], 4),
                 "macro_f1": round(final["macro_f1"], 4),
@@ -693,6 +911,32 @@ class SegFormerTrainer:
             ),
             "train_image_count": len(self.train_loader.dataset),
             "validation_image_count": len(self.val_loader.dataset),
+            "train_image_ids": sorted(
+                Path(image_path).stem
+                for image_path, _ in self.train_loader.dataset.valid_pairs
+            ),
+            "validation_image_ids": sorted(
+                Path(image_path).stem
+                for image_path, _ in self.val_loader.dataset.valid_pairs
+            ),
+            "train_unmapped_pixel_count": self.train_unmapped_pixel_count,
+            "validation_unmapped_pixel_count": self.validation_unmapped_pixel_count,
+            "class_weights": self.class_weights,
+            "sampling_strategy": self.args.sampling_strategy,
+            "class_image_counts": self.class_image_counts,
+            "sample_weights": (
+                self.sample_weights.tolist()
+                if self.sample_weights is not None
+                else None
+            ),
+            "unknown_mask_color_policy": "ignore_index_255_exact_rgb",
+            "determinism_note": (
+                "Python, NumPy, and Torch seeds set; deterministic Torch "
+                "algorithms requested with warn_only=True. Backend kernels may "
+                "remain nondeterministic."
+                if self.args.deterministic
+                else "Random seeds set; deterministic Torch algorithms disabled."
+            ),
             "skipped_pairs": self.skipped_pairs,
             "training_history": self.history,
             "config": vars(self.args),
@@ -710,8 +954,27 @@ class SegFormerTrainer:
 
 
 def parse_args():
+    config_parser = argparse.ArgumentParser(add_help=False)
+    config_parser.add_argument("--config")
+    config_args, _ = config_parser.parse_known_args()
+    config_defaults = {}
+    if config_args.config:
+        config_path = Path(config_args.config)
+        if not config_path.is_absolute():
+            config_path = PROJECT_ROOT / config_path
+        with config_path.open(encoding="utf-8") as config_file:
+            config_defaults = json.load(config_file)
+
     p = argparse.ArgumentParser()
+    p.add_argument("--config", default=config_args.config)
+    p.add_argument(
+        "--model_type",
+        choices=("segformer", "deeplabv3plus"),
+        default="segformer",
+    )
     p.add_argument("--model_name", default="nvidia/mit-b3")
+    p.add_argument("--encoder_name", default="resnet50")
+    p.add_argument("--encoder_weights", default="imagenet")
     p.add_argument("--dataset_root", default=str(PROJECT_ROOT / "FloodNet"))
     p.add_argument("--img_dir", default=None)
     p.add_argument("--mask_dir", default=None)
@@ -719,6 +982,17 @@ def parse_args():
     p.add_argument("--batch_size", type=int, default=1)
     p.add_argument("--grad_accum_steps", type=int, default=4)
     p.add_argument("--lr", type=float, default=6e-5)
+    p.add_argument(
+        "--loss_type",
+        choices=("cross_entropy", "weighted_cross_entropy", "dice_focal"),
+        default="dice_focal",
+    )
+    p.add_argument(
+        "--sampling_strategy",
+        choices=("uniform", "class_balanced"),
+        default="uniform",
+        help="Optionally oversample images containing less frequent classes.",
+    )
     p.add_argument(
         "--init_checkpoint",
         default=None,
@@ -738,12 +1012,25 @@ def parse_args():
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--min_delta", type=float, default=0.001)
     p.add_argument("--early_stopping_patience", type=int, default=8)
+    p.add_argument(
+        "--max_train_batches",
+        type=int,
+        default=0,
+        help="Limit batches per epoch for a smoke test; 0 uses the full training set.",
+    )
+    p.add_argument(
+        "--deterministic",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Request deterministic Torch algorithms where available.",
+    )
     p.add_argument("--checkpoint_dir", default="checkpoints/segformer_full")
     p.add_argument(
         "--results_file",
         default="results/segformer_full_finetune_results.json",
     )
     p.add_argument("--save_every", type=int, default=5)
+    p.set_defaults(**config_defaults)
     return p.parse_args()
 
 

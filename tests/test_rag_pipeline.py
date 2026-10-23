@@ -95,6 +95,9 @@ class RagPipelineTests(unittest.TestCase):
         self.assertEqual(incident["prioritized_actions"], [])
         self.assertNotIn("[NDMA", report["markdown_rendered"])
         self.assertEqual(incident["damage_assessment"]["flooded_buildings_count"], 2)
+        self.assertIn("Building-Flooded components", report["markdown_rendered"])
+        self.assertIn("not georeferenced area", report["markdown_rendered"])
+        self.assertNotIn("local road network submerged", report["markdown_rendered"])
 
     def test_rag_query_endpoint_returns_cited_matches_and_validates_bounds(self):
         from dashboard import server

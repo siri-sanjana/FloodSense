@@ -2,6 +2,27 @@
 
 Multimodal flood damage extraction, computer vision benchmarking, and RAG-LLM disaster reporting dashboard.
 
+## FloodNet sample images
+
+FloodSense uses selected image/mask pairs from FloodNet, a high-resolution aerial
+imagery dataset for post-flood scene understanding. The included Studio samples
+retain their dataset image IDs and use captions based only on visible scene
+content:
+
+| Dataset image ID | Caption |
+|------------------|---------|
+| `10169` | Homes beside open ground |
+| `10815` | Homes, roads, and dense trees |
+| `6423` | Road junction and residential blocks |
+
+These IDs are dataset identifiers, not locations. The sample metadata available
+to this app does not verify city, region, coordinates, flood cause, or incident
+severity, so the UI does not assign those details to the images. The benchmark
+uses pixel-level semantic labels for background, flooded/non-flooded buildings,
+flooded/non-flooded roads, water, trees, vehicles, pools, and grass. Captions
+describe visible content and should not be read as geolocation or incident
+claims.
+
 ## Fine-tune the segmentation model
 
 The SegFormer trainer uses FloodNet's official train split for training and
@@ -58,14 +79,32 @@ checkpoint remains untouched:
   --results_file results/segformer_miou_tune.json
 ```
 
+For a reproducible image-level class-balanced experiment, use the dedicated
+config below. It samples only the 398 officially labeled training pairs with
+replacement, giving more sampling probability to images containing classes
+that appear in fewer training images. It does not create new labels or use the
+unlabeled images. The official validation split is still reserved for model
+selection:
+
+```bash
+PYTHONPATH=. USE_TF=0 .venv/bin/python \
+  models_benchmark/06_segformer_finetune.py \
+  --config configs/segmentation/segformer_b3_class_balanced.json
+```
+
 Promote an experimental checkpoint only if it improves validation mIoU
 meaningfully on the same fixed split; inspect per-class IoU as well, since
 class balancing can help rare classes while hurting others.
 
-The dashboard uses `checkpoints/segformer_full/segformer_best.pt` for its
-FloodNet SegFormer-B3 predictions when that file is available. Set
-`FLOODSENSE_SEGFORMER_CHECKPOINT` to override its location. Without the
-checkpoint, it falls back to the pretrained SegFormer baseline.
+The dashboard uses `checkpoints/segformer_full/segformer_best.pt` for
+FloodNet SegFormer-B3 predictions only when the checkpoint is available and
+heavy computer vision is enabled. Set `FLOODSENSE_SEGFORMER_CHECKPOINT` to
+override its location. Without that checkpoint, it can use an ADE20K-pretrained
+SegFormer with heuristic FloodNet label mapping. When `DISABLE_HEAVY_CV=1`
+(as in the included CPU container configuration), SegFormer and SAM requests
+fall back to classical color/threshold segmentation; the API response reports
+the model actually used. No current held-out benchmark is available, so the
+backend does not publish verified mIoU or F1 scores.
 
 The dashboard also produces a relative monocular depth map using
 `depth-anything/Depth-Anything-V2-Small-hf`. The model is downloaded on first

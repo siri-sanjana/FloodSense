@@ -54,10 +54,8 @@ if MODELS_BENCHMARK_DIR not in sys.path:
 from damage_extraction.damage_extractor import (
     COLOR_PALETTE,
     CLASS_DISPLAY_COLORS,
-    SEVERITY_WEIGHTS,
     rgb_mask_to_class_mask,
     count_components,
-    pixel_area_m2
 )
 import importlib
 
@@ -119,11 +117,18 @@ def can_use_finetuned_segformer():
     )
 
 
+def heavy_cv_disabled():
+    return (
+        os.environ.get("RENDER") is not None
+        or os.environ.get("DISABLE_HEAVY_CV", "0") == "1"
+    )
+
+
 def get_segformer():
     global segformer_instance
     if segformer_instance is None:
         # On Render / CPU cloud instances, use fast Classical CV pipeline to prevent 90s Hugging Face download timeouts
-        if os.environ.get("RENDER") is not None or os.environ.get("DISABLE_HEAVY_CV", "0") == "1":
+        if heavy_cv_disabled():
             print("[Model Loader] Cloud env detected — using Classical CV for SegFormer slot.")
             class FastCloudSegFormer:
                 model_id = "classical"
@@ -166,9 +171,11 @@ def get_relative_depth_estimator():
 def get_sam():
     global sam_instance
     if sam_instance is None:
-        if os.environ.get("RENDER") is not None or os.environ.get("DISABLE_HEAVY_CV", "0") == "1":
+        if heavy_cv_disabled():
             print("[Model Loader] Cloud env detected — using Classical CV for SAM slot.")
             class FastCloudSAM:
+                model_id = "classical"
+
                 def segment_image(self, img_rgb):
                     return segment_classical_multiclass(img_rgb)
             sam_instance = FastCloudSAM()
@@ -182,6 +189,8 @@ def get_sam():
         except Exception as e:
             print(f"[Model Loader Warning] SAM initialization failed ({e}). Falling back to Classical CV.")
             class FallbackSAM:
+                model_id = "classical"
+
                 def segment_image(self, img_rgb):
                     return segment_classical_multiclass(img_rgb)
             sam_instance = FallbackSAM()
@@ -295,15 +304,15 @@ def generate_color_overlay(img_rgb: np.ndarray, class_mask: np.ndarray, target_s
         color_layer = np.array(Image.fromarray(color_layer).resize(target_size, Image.NEAREST))
     return color_layer
 
-def extract_metrics_from_class_mask(class_mask: np.ndarray, original_shape=(512, 512)) -> dict:
+def extract_metrics_from_class_mask(class_mask: np.ndarray) -> dict:
     total = class_mask.size
-    h, w = class_mask.shape
-    
+    class_counts = {}
     class_pct = {}
     for cid, (label, _) in COLOR_PALETTE.items():
         cnt = int(np.sum(class_mask == cid))
+        class_counts[label] = cnt
         class_pct[label] = round(cnt / total * 100, 3)
-        
+
     fb_mask = (class_mask == 1).astype(np.uint8)
     nfb_mask = (class_mask == 2).astype(np.uint8)
     fb_cnt, _ = count_components(fb_mask, 300)
@@ -322,10 +331,21 @@ def extract_metrics_from_class_mask(class_mask: np.ndarray, original_shape=(512,
     
     flood_px = fb_px + fr_px + water_px + pool_px
     flood_pct = round(flood_px / total * 100, 3)
-    
-    # Severity score calculation
-    severity_raw = sum(SEVERITY_WEIGHTS.get(cid, 0.0) * class_pct[label] for cid, (label, _) in COLOR_PALETTE.items())
-    max_possible = sum(v * 100.0 for v in SEVERITY_WEIGHTS.values())
+
+    severity_weights = {
+        "building-flooded": 10.0,
+        "road-flooded": 8.0,
+        "water": 5.0,
+        "pool": 3.0,
+        "building-non-flooded": 1.0,
+        "road-non-flooded": 0.5,
+        "vehicle": 2.0,
+    }
+    severity_raw = sum(
+        severity_weights.get(label, 0.0) * class_pct[label]
+        for label, _ in COLOR_PALETTE.values()
+    )
+    max_possible = sum(v * 100.0 for v in severity_weights.values())
     raw_score = round((severity_raw / max_possible) * 100, 2) if max_possible > 0 else 0.0
     
     if raw_score >= 15.0:
@@ -341,37 +361,54 @@ def extract_metrics_from_class_mask(class_mask: np.ndarray, original_shape=(512,
     
     return {
         "analysis_method": "Multi-Class Semantic Segmentation",
+        "metric_basis": (
+            "Predicted FloodNet class-mask pixels and connected components. "
+            "No georeferencing, camera calibration, or field verification is used."
+        ),
         "damage_summary": {
             "damage_severity_score": raw_score,
             "severity_label": sev_label,
+            "severity_basis": "Unvalidated class-weighted image proxy; not incident severity.",
             "flood_coverage_pct": flood_pct,
-            "total_flood_area_m2": pixel_area_m2(flood_px, (h, w)),
+            "total_flood_area_px": flood_px,
+            "total_flood_area_m2": None,
         },
         "buildings": {
             "flooded_building_count": fb_cnt,
+            "flooded_building_component_count_estimate": fb_cnt,
+            "flooded_building_area_px": fb_px,
             "flooded_building_area_pct": round(fb_px / total * 100, 3),
-            "flooded_building_area_m2": pixel_area_m2(fb_px, (h, w)),
+            "flooded_building_area_m2": None,
             "non_flooded_building_count": nfb_cnt,
+            "non_flooded_building_component_count_estimate": nfb_cnt,
+            "non_flooded_building_area_px": nfb_px,
             "non_flooded_building_area_pct": round(nfb_px / total * 100, 3),
-            "non_flooded_building_area_m2": pixel_area_m2(nfb_px, (h, w)),
+            "non_flooded_building_area_m2": None,
             "total_building_count": fb_cnt + nfb_cnt,
             "building_flood_ratio": round(fb_cnt / max(1, fb_cnt + nfb_cnt), 3),
         },
         "roads": {
             "flooded_road_coverage_pct": round(fr_px / total * 100, 3),
-            "flooded_road_area_m2": pixel_area_m2(fr_px, (h, w)),
+            "flooded_road_area_px": fr_px,
+            "flooded_road_area_m2": None,
             "non_flooded_road_coverage_pct": round(nfr_px / total * 100, 3),
+            "non_flooded_road_area_px": nfr_px,
             "total_road_coverage_pct": round((fr_px + nfr_px) / total * 100, 3),
         },
         "water": {
             "water_body_coverage_pct": round(water_px / total * 100, 3),
-            "water_body_area_m2": pixel_area_m2(water_px, (h, w)),
+            "water_body_area_px": water_px,
+            "water_body_area_m2": None,
             "pool_coverage_pct": round(pool_px / total * 100, 3),
+            "pool_area_px": pool_px,
         },
         "vehicles": {
             "vehicle_count": veh_cnt,
+            "vehicle_component_count_estimate": veh_cnt,
             "vehicle_area_pct": round(veh_px / total * 100, 3),
+            "vehicle_area_px": veh_px,
         },
+        "class_pixel_counts": class_counts,
         "class_pixel_distribution_pct": class_pct,
     }
 
@@ -382,74 +419,104 @@ def index():
 
 @app.route("/api/status", methods=["GET"])
 def api_status():
-    chunks = 0
+    chunks = None
+    vector_store_error = None
     if vector_store is not None:
         if getattr(vector_store, "collection", None) is not None:
             try:
                 chunks = vector_store.collection.count()
-            except Exception:
-                chunks = 0
+            except Exception as error:
+                vector_store_error = str(error)
         else:
             chunks = len(getattr(vector_store, "fallback_chunks", []))
+
+    if vector_store is None:
+        retrieval_mode = "not_initialized"
+    elif getattr(vector_store, "collection", None) is None:
+        retrieval_mode = "tfidf_fallback"
+    else:
+        retrieval_mode = "vector_db"
 
     return jsonify({
         "status": "online",
         "system": "FloodSense Multimodal Emergency Reporting System",
         "version": "2.0",
         "vector_store_chunks": chunks,
+        "vector_store_error": vector_store_error,
         "gpu_available": False,
-        "deployment_mode": "tfidf_fallback" if vector_store is not None and getattr(vector_store, "collection", None) is None else "vector_db"
+        "deployment_mode": retrieval_mode,
     })
 
 @app.route("/api/models", methods=["GET"])
 def api_models():
     finetuned_segformer = can_use_finetuned_segformer()
+    cv_disabled = heavy_cv_disabled()
+    if cv_disabled:
+        segformer_name = "Classical CV (SegFormer request fallback)"
+        segformer_description = (
+            "This runtime disables heavy computer vision; SegFormer requests are "
+            "served by the classical color/threshold segmenter."
+        )
+        sam_name = "Classical CV (SAM request fallback)"
+        sam_description = (
+            "This runtime disables heavy computer vision; SAM requests are served "
+            "by the classical color/threshold segmenter."
+        )
+    elif finetuned_segformer:
+        segformer_name = "FloodNet SegFormer-B3 (Fine-Tuned Checkpoint)"
+        segformer_description = (
+            "A local FloodNet 10-class checkpoint is available. Its historical "
+            "validation result is not independently verified on the current split."
+        )
+        sam_name = "SAM (Segment Anything Model)"
+        sam_description = (
+            "Promptable segmentation backend; initialization may fall back to "
+            "classical CV, which is identified by the inference response."
+        )
+    else:
+        segformer_name = "ADE20K-pretrained SegFormer (heuristic FloodNet mapping)"
+        segformer_description = (
+            "ADE20K semantic labels are heuristically remapped to FloodNet classes; "
+            "this is not a FloodNet-trained 10-class model."
+        )
+        sam_name = "SAM (Segment Anything Model)"
+        sam_description = (
+            "Promptable segmentation backend; initialization may fall back to "
+            "classical CV, which is identified by the inference response."
+        )
+
+    metrics_status = "No current, independently reproduced held-out benchmark is available."
     models = [
         {
             "id": "segformer",
-            "name": (
-                "FloodNet SegFormer-B3 (Fine-Tuned)"
-                if finetuned_segformer
-                else "OneFormer / SegFormer (Transformer)"
-            ),
-            "description": (
-                "FloodNet fine-tuned 10-class transformer segmentation; "
-                "validation mIoU is reported on a held-out 95-image split."
-                if finetuned_segformer
-                else "Pretrained transformer segmenter; the FloodNet fine-tuned checkpoint is not installed."
-            ),
-            "mIoU": 0.5751 if finetuned_segformer else 0.0937,
-            "macro_f1": 0.6897 if finetuned_segformer else 0.1175,
+            "name": segformer_name,
+            "description": segformer_description,
+            "mIoU": None,
+            "macro_f1": None,
             "latency_ms": None,
-            "recommended": True
+            "metrics_status": metrics_status,
+            "recommended": finetuned_segformer and not cv_disabled,
         },
         {
             "id": "classical",
             "name": "Classical CV Multi-Space Thresholding",
-            "description": "Ultra-fast HSV + LAB color space clustering and edge contour detection.",
-            "mIoU": 0.0748,
-            "macro_f1": 0.1079,
-            "latency_ms": 22.8,
-            "recommended": False
+            "description": "Color/threshold-based segmentation; not a learned flood model.",
+            "mIoU": None,
+            "macro_f1": None,
+            "latency_ms": None,
+            "metrics_status": metrics_status,
+            "recommended": cv_disabled,
         },
         {
             "id": "sam",
-            "name": "SAM (Segment Anything Model)",
-            "description": "Promptable foundation segmentation with feature-based region classification.",
-            "mIoU": 0.0813,
-            "macro_f1": 0.1045,
-            "latency_ms": 1063.1,
-            "recommended": False
+            "name": sam_name,
+            "description": sam_description,
+            "mIoU": None,
+            "macro_f1": None,
+            "latency_ms": None,
+            "metrics_status": metrics_status,
+            "recommended": False,
         },
-        {
-            "id": "ground_truth",
-            "name": "FloodNet Ground Truth Mask Analysis",
-            "description": "Exact pixel-level annotated mask analysis for validation benchmarks.",
-            "mIoU": 1.0,
-            "macro_f1": 1.0,
-            "latency_ms": 10.0,
-            "recommended": False
-        }
     ]
     return jsonify({"models": models})
 
@@ -618,8 +685,9 @@ def api_segment():
             _, class_mask = segment_classical_multiclass(image_rgb)
             model_used = "classical"
         elif requested_model == "sam":
-            _, class_mask = get_sam().segment_image(image_rgb)
-            model_used = "sam"
+            segmenter = get_sam()
+            _, class_mask = segmenter.segment_image(image_rgb)
+            model_used = getattr(segmenter, "model_id", "sam")
         else:
             segmenter = get_segformer()
             _, class_mask = segmenter.segment_image(image_rgb)
@@ -668,10 +736,16 @@ def api_segment():
 
     return jsonify({
         "status": "success",
+        "requested_model": requested_model,
         "model_used": model_used,
+        "fallback_applied": requested_model != model_used,
         "model_display_name": (
-            "FloodNet SegFormer-B3 (Fine-Tuned)"
+            "FloodNet SegFormer-B3 (Fine-Tuned Checkpoint)"
             if model_used == "segformer" and can_use_finetuned_segformer()
+            else "ADE20K-pretrained SegFormer (heuristic FloodNet mapping)"
+            if model_used == "segformer"
+            else "Classical CV Multi-Space Thresholding"
+            if model_used == "classical"
             else model_used.replace("_", " ").title()
         ),
         "image_size": {"width": original_size[0], "height": original_size[1]},
@@ -802,6 +876,7 @@ def api_analyze():
             model_name = requested_model
             is_recommended = (model_name == rec_model)
             print(f"[Model Selection] User specified model '{model_name}' (Recommended was '{rec_model}')")
+        selected_model_name = model_name
 
         # ── Step 2: Run Computer Vision Segmentation (with Auto-Fallback) ──
         inference_t0 = time.time()
@@ -817,6 +892,7 @@ def api_analyze():
             elif model_name == "sam":
                 sam = get_sam()
                 _, class_mask = sam.segment_image(img_rgb)
+                model_name = getattr(sam, "model_id", "sam")
             elif model_name == "segformer":
                 segformer = get_segformer()
                 _, class_mask = segformer.segment_image(img_rgb)
@@ -856,7 +932,7 @@ def api_analyze():
         depth_ms = round((time.time() - depth_t0) * 1000, 1)
 
         # ── Step 3: Extract Damage Metrics ──
-        damage_metrics = extract_metrics_from_class_mask(class_mask, original_shape=target_size)
+        damage_metrics = extract_metrics_from_class_mask(class_mask)
         damage_metrics["model_used"] = model_name
         damage_metrics["recommended_model"] = rec_model
         damage_metrics["is_recommended"] = is_recommended
@@ -904,7 +980,7 @@ def api_analyze():
             "segformer": (
                 "FloodNet SegFormer-B3 (Fine-Tuned)"
                 if can_use_finetuned_segformer()
-                else "OneFormer / SegFormer (Transformer)"
+                else "ADE20K-pretrained SegFormer (heuristic FloodNet mapping)"
             ),
             "classical": "Classical CV (HSV + LAB Thresholding)",
             "sam": "SAM (Segment Anything Model)",
@@ -913,6 +989,7 @@ def api_analyze():
 
         response_payload = {
             "status": "success",
+            "requested_model": requested_model or "auto",
             "timings": {
                 "cv_inference_ms": inference_ms,
                 "depth_inference_ms": depth_ms,
@@ -921,6 +998,7 @@ def api_analyze():
                 "total_latency_ms": total_ms
             },
             "model_used": model_name,
+            "fallback_applied": model_name != selected_model_name,
             "model_display_name": MODEL_DISPLAY_NAMES.get(model_name, model_name),
             "recommended_model": rec_model,
             "recommended_model_display_name": MODEL_DISPLAY_NAMES.get(rec_model, rec_model),

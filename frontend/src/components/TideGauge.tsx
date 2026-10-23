@@ -5,28 +5,17 @@ import { motion } from 'framer-motion';
 import { AlertTriangle, ShieldCheck, Flame, Droplets } from 'lucide-react';
 
 interface TideGaugeProps {
-  score?: number; // 0.0 to 10.0
+  score: number;
   level?: 'LOW' | 'MODERATE' | 'CRITICAL' | 'CATASTROPHIC';
   height?: number; // pixel height, default 280
-  currentWaterLevelMeters?: number;
-  dangerThresholdMeters?: number;
-  tidePhase?: string;
 }
 
 export const TideGauge: React.FC<TideGaugeProps> = ({
   score: rawScore,
   level: rawLevel,
   height = 280,
-  currentWaterLevelMeters,
-  dangerThresholdMeters = 2.5,
-  tidePhase = 'Rising High Surge',
 }) => {
-  const score =
-    rawScore !== undefined
-      ? rawScore
-      : currentWaterLevelMeters !== undefined
-      ? Math.min(10, Number(((currentWaterLevelMeters / dangerThresholdMeters) * 10).toFixed(1)))
-      : 8.1;
+  const score = Math.min(10, Math.max(0, rawScore));
 
   const level: 'LOW' | 'MODERATE' | 'CRITICAL' | 'CATASTROPHIC' =
     rawLevel ||
@@ -46,21 +35,21 @@ export const TideGauge: React.FC<TideGaugeProps> = ({
         return {
           color: '#DC2626',
           glow: 'rgba(220, 38, 38, 0.6)',
-          tag: 'DEFCON 1 // RUN',
+          tag: 'CATASTROPHIC CLASS PROXY',
           icon: Flame,
         };
       case 'CRITICAL':
         return {
           color: '#00D4FF',
           glow: 'rgba(0, 212, 255, 0.6)',
-          tag: 'HIGH INUNDATION',
+          tag: 'CRITICAL CLASS PROXY',
           icon: AlertTriangle,
         };
       case 'MODERATE':
         return {
           color: '#00B8D9',
           glow: 'rgba(0, 184, 217, 0.4)',
-          tag: 'WATCH DYKES',
+          tag: 'MODERATE CLASS PROXY',
           icon: Droplets,
         };
       case 'LOW':
@@ -68,7 +57,7 @@ export const TideGauge: React.FC<TideGaugeProps> = ({
         return {
           color: '#059669',
           glow: 'rgba(5, 150, 105, 0.3)',
-          tag: 'PASSABLE',
+          tag: 'LOW CLASS PROXY',
           icon: ShieldCheck,
         };
     }
@@ -85,17 +74,12 @@ export const TideGauge: React.FC<TideGaugeProps> = ({
       {/* Top score readout */}
       <div className="flex flex-col items-center mb-2 text-center">
         <span className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">
-          HYDRO SEVERITY GAUGE
+          IMAGE-CLASS PROXY
         </span>
         <div className="text-base font-bold text-slate-900 flex items-baseline space-x-0.5">
           <span>{score.toFixed(1)}</span>
           <span className="text-[10px] text-slate-500">/10</span>
         </div>
-        {currentWaterLevelMeters !== undefined && (
-          <span className="text-[10px] text-cyan-800 mt-0.5 font-medium">
-            {currentWaterLevelMeters.toFixed(2)}m Depth &bull; {tidePhase}
-          </span>
-        )}
       </div>
 
       {/* Vertical gauge track */}
@@ -135,8 +119,11 @@ export const TideGauge: React.FC<TideGaugeProps> = ({
           }}
         >
           <Icon className="w-3 h-3" />
-          <span>{theme.tag}</span>
+          <span>UNVERIFIED {theme.tag}</span>
         </div>
+        <span className="mt-1 block text-[9px] text-slate-500">
+          Not calibrated for incident severity or water depth
+        </span>
       </div>
     </div>
   );

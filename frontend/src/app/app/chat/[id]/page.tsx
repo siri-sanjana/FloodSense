@@ -12,7 +12,6 @@ import {
   Crosshair,
   ArrowRight,
   ShieldAlert,
-  SplitSquareVertical,
   Copy,
   Check,
   RefreshCw,
@@ -21,13 +20,16 @@ import {
   Image as ImageIcon
 } from 'lucide-react';
 import { MaskViewer } from '../../../../components/MaskViewer';
-import { TideGauge } from '../../../../components/TideGauge';
 import { SitrepStream } from '../../../../components/SitrepStream';
 import { DamageTable } from '../../../../components/DamageTable';
-import { CompareSlider } from '../../../../components/CompareSlider';
 import { CitationDrawer } from '../../../../components/CitationDrawer';
 import { ChatMessage, CitationClause, DamageStats, RegionContext } from '../../../../lib/types';
 import { api } from '../../../../lib/api';
+import {
+  FLOODNET_SAMPLES,
+  loadFloodNetSampleImage,
+  type FloodNetSampleId,
+} from '../../../../lib/floodnet-samples';
 import { exportSitrep } from '../../../../lib/sitrep-export';
 
 interface ChatPageProps {
@@ -47,26 +49,13 @@ const FLOODNET_CLASSES = [
   { name: 'grass', color: '#04fa07' },
 ];
 
-async function fetchSampleImage(sampleId: string): Promise<File> {
-  const response = await fetch(`/samples/${sampleId}.jpg`);
-  if (!response.ok) {
-    throw new Error(`Could not load FloodNet demo image ${sampleId} (${response.status}).`);
-  }
-
-  const image = await response.blob();
-  return new File([image], `floodnet-${sampleId}.jpg`, {
-    type: image.type || 'image/jpeg',
-  });
-}
-
 function mapDamageStats(metrics: Record<string, any>): DamageStats {
   const summary = metrics.damage_summary || {};
   const buildings = metrics.buildings || {};
   const roads = metrics.roads || {};
   const distribution = metrics.class_pixel_distribution_pct || {};
-  const totalArea = Number(summary.total_flood_area_m2) || 0;
+  const totalAreaPixels = Number(summary.total_flood_area_px) || 0;
   const floodCoverage = Number(summary.flood_coverage_pct) || 0;
-  const estimatedSceneArea = floodCoverage > 0 ? totalArea / (floodCoverage / 100) : null;
   const severityScore = (Number(summary.damage_severity_score) || 0) / 10;
   const severityLabel = String(summary.severity_label || '').toUpperCase();
   const severityLevel =
@@ -79,7 +68,9 @@ function mapDamageStats(metrics: Record<string, any>): DamageStats {
   return {
     severity_score: severityScore,
     severity_level: severityLevel,
-    total_inundated_area_m2: totalArea,
+    total_inundated_area_m2: null,
+    total_inundated_pixels: totalAreaPixels,
+    flood_coverage_pct: floodCoverage,
     flooded_buildings_count: Number(buildings.flooded_building_count) || 0,
     safe_buildings_count: Number(buildings.non_flooded_building_count) || 0,
     flooded_roads_km: null,
@@ -92,13 +83,9 @@ function mapDamageStats(metrics: Record<string, any>): DamageStats {
         id,
         name: floodClass.name.replaceAll('-', ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
         color: floodClass.color,
-        pixel_count: Math.round((percentage / 100) * 512 * 512),
-        area_m2:
-          percentage === 0
-            ? 0
-            : estimatedSceneArea === null
-            ? null
-            : Math.round((percentage / 100) * estimatedSceneArea),
+        pixel_count: Number(metrics.class_pixel_counts?.[floodClass.name]) ||
+          Math.round((percentage / 100) * 512 * 512),
+        area_m2: null,
         percentage,
         is_flooded: [1, 3, 5, 8].includes(id),
       };
@@ -112,17 +99,18 @@ export default function ChatPage({ params }: ChatPageProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedSampleId = searchParams.get('sample_id');
+  const isFloodNetSampleId = (value: string | null): value is FloodNetSampleId =>
+    value !== null && Object.hasOwn(FLOODNET_SAMPLES, value);
 
   const [currentThread, setCurrentThread] = useState<{
     id: string;
     title: string;
     location_tag: string;
-    severity: 'LOW' | 'MODERATE' | 'CRITICAL' | 'CATASTROPHIC';
+    severity?: 'LOW' | 'MODERATE' | 'CRITICAL' | 'CATASTROPHIC';
   }>({
     id: threadId,
-    title: 'Tactical UAV Reconnaissance Pass',
-    location_tag: 'Sector Coordinates Unconfirmed',
-    severity: 'MODERATE' as const,
+    title: 'Flood image analysis',
+    location_tag: 'Location not provided',
   });
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -136,7 +124,6 @@ export default function ChatPage({ params }: ChatPageProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [attachedRegion, setAttachedRegion] = useState<RegionContext | null>(null);
   const [activeCitation, setActiveCitation] = useState<CitationClause | null>(null);
-  const [compareMode, setCompareMode] = useState(false);
   const [activeSector, setActiveSector] = useState<'10169' | '10815' | '6423'>('10169');
   const [exportError, setExportError] = useState<string | null>(null);
   const [publishedMessageIds, setPublishedMessageIds] = useState<Set<string>>(new Set());
@@ -147,24 +134,9 @@ export default function ChatPage({ params }: ChatPageProps) {
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   const SECTOR_SCENARIOS = [
-    {
-      id: '10169',
-      name: 'Pass 10169 (Residential Inundation)',
-      image: '/samples/10169.jpg',
-      mask: '/samples/10169_mask.png',
-    },
-    {
-      id: '10815',
-      name: 'Pass 10815 (Canal Breach & Roads)',
-      image: '/samples/10815.jpg',
-      mask: '/samples/10815_mask.png',
-    },
-    {
-      id: '6423',
-      name: 'Pass 6423 (Bridge Axis & Overwash)',
-      image: '/samples/6423.jpg',
-      mask: '/samples/6423_mask.png',
-    },
+    FLOODNET_SAMPLES['10169'],
+    FLOODNET_SAMPLES['10815'],
+    FLOODNET_SAMPLES['6423'],
   ];
 
   useEffect(() => {
@@ -182,9 +154,8 @@ export default function ChatPage({ params }: ChatPageProps) {
         if (!active) return;
         if (!thread) {
           const created = await api.createChat({
-            title: 'Tactical UAV Reconnaissance Pass',
-            location_tag: 'Sector Coordinates Unconfirmed',
-            severity: 'LOW',
+            title: 'Flood image analysis',
+            location_tag: 'Location not provided',
           });
           router.replace(`/app/chat/${created.id}`);
           return;
@@ -192,15 +163,13 @@ export default function ChatPage({ params }: ChatPageProps) {
         setCurrentThread({
           id: thread.id,
           title: thread.title,
-          location_tag: thread.location_tag || 'Sector Coordinates Unconfirmed',
-          severity: thread.severity || 'LOW',
+          location_tag: thread.location_tag || 'Location not provided',
+          severity: thread.severity,
         });
         setMessages(savedMessages);
         if (
           savedMessages.length === 0 &&
-          (requestedSampleId === '10169' ||
-            requestedSampleId === '10815' ||
-            requestedSampleId === '6423')
+          isFloodNetSampleId(requestedSampleId)
         ) {
           setPendingSampleId(requestedSampleId);
           return;
@@ -283,7 +252,7 @@ export default function ChatPage({ params }: ChatPageProps) {
     setSelectedImage(null);
     setSelectedFile(null);
     setSelectedFileName(null);
-    void submitPrompt(`Analyze FloodNet sample ${sec.id}: ${sec.name}`, null, secId);
+    void submitPrompt(`Analyze ${sec.title}`, null, secId);
   };
 
   const submitPrompt = async (
@@ -330,7 +299,14 @@ export default function ChatPage({ params }: ChatPageProps) {
           ? previous.map((message) => message.id === userMsg.id ? displayUserMessage : message)
           : [...previous, displayUserMessage],
       );
-      const analysisImage = imageFile || await fetchSampleImage(sampleId);
+      const analysisImage =
+        imageFile ||
+        (isFloodNetSampleId(sampleId)
+          ? await loadFloodNetSampleImage(sampleId)
+          : undefined);
+      if (!analysisImage) {
+        throw new Error('Choose a valid FloodNet sample or upload an image before analysis.');
+      }
       const analysis = await api.analyze({
         image: analysisImage,
         model: 'segformer',
@@ -385,7 +361,7 @@ export default function ChatPage({ params }: ChatPageProps) {
     if (!sample) return;
     setPendingSampleId(null);
     setActiveSector(pendingSampleId);
-    void submitPrompt(`Analyze FloodNet sample ${sample.id}: ${sample.name}`, null, sample.id, null);
+    void submitPrompt(`Analyze ${sample.title}`, null, sample.id, null);
   }, [pendingSampleId]);
 
   const handleSendMessage = async (e?: React.FormEvent) => {
@@ -481,15 +457,6 @@ export default function ChatPage({ params }: ChatPageProps) {
           <span className="text-slate-500 text-[11px] hidden md:inline-block truncate">
             {currentThread.location_tag}
           </span>
-          <span
-            className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
-              currentThread.severity === 'CRITICAL'
-                ? 'bg-red-50 text-red-700 border border-red-200'
-                : 'bg-cyan-50 text-cyan-800 border border-cyan-200'
-            }`}
-          >
-            {currentThread.severity}
-          </span>
         </div>
 
         <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
@@ -500,18 +467,6 @@ export default function ChatPage({ params }: ChatPageProps) {
             <Activity className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">3D Twin</span>
           </Link>
-
-          <button
-            onClick={() => setCompareMode(!compareMode)}
-            className={`flex items-center space-x-1.5 px-2.5 py-1 border rounded-lg text-[11px] transition-colors ${
-              compareMode
-                ? 'bg-cyan-600 text-white font-medium border-cyan-600'
-                : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
-            }`}
-          >
-            <SplitSquareVertical className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">{compareMode ? 'Exit Compare' : 'Compare Timeline'}</span>
-          </button>
 
           <button
             onClick={() => {
@@ -535,7 +490,7 @@ export default function ChatPage({ params }: ChatPageProps) {
           {SECTOR_SCENARIOS.map((sec) => (
             <button
               key={sec.id}
-              onClick={() => handleSelectSector(sec.id as any)}
+              onClick={() => handleSelectSector(sec.id)}
               className={`px-3 py-1 text-[11px] rounded-lg transition-all flex items-center space-x-1.5 shrink-0 cursor-pointer border ${
                 activeSector === sec.id
                   ? 'bg-white border-cyan-500 text-cyan-900 font-semibold shadow-2xs'
@@ -547,7 +502,7 @@ export default function ChatPage({ params }: ChatPageProps) {
                   activeSector === sec.id ? 'bg-cyan-600' : 'bg-slate-400'
                 }`}
               />
-              <span>{sec.name}</span>
+              <span>{sec.title}</span>
             </button>
           ))}
         </div>
@@ -555,20 +510,6 @@ export default function ChatPage({ params }: ChatPageProps) {
           <span>10-Class Semantic Segmentation Active</span>
         </div>
       </div>
-
-      {/* ────────────────── COMPARE TIMELINE DRAWER ────────────────── */}
-      {compareMode && (
-        <div className="relative z-10 p-4 bg-slate-50 border-b border-slate-200">
-          <CompareSlider
-            beforeImage="https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=1200&q=80"
-            afterImage="https://images.unsplash.com/photo-1547683905-f686c993aae5?auto=format&fit=crop&w=1200&q=80"
-            beforeDate="18 Oct 2026, 09:00 IST (Pass 1)"
-            afterDate="19 Oct 2026, 15:30 IST (Pass 2)"
-            beforeInundatedM2={34400}
-            afterInundatedM2={48620}
-          />
-        </div>
-      )}
 
       {exportError && (
         <div role="alert" className="mx-4 mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 sm:mx-8">
@@ -626,35 +567,23 @@ export default function ChatPage({ params }: ChatPageProps) {
             {msg.role === 'assistant' && (
               <div className="space-y-5 pt-1">
                 <div className="grid grid-cols-1 gap-6 items-start">
-                  {/* Left: Imagery with Tide Gauge */}
+                  {/* Segmentation result */}
                   {msg.raw_image_url && (
-                    <div className="flex space-x-3 items-stretch">
-                      {msg.damage_stats && (
-                        <div className="shrink-0 pt-1">
-                          <TideGauge
-                            score={msg.damage_stats.severity_score}
-                            level={msg.damage_stats.severity_level}
-                            height={340}
-                          />
-                        </div>
-                      )}
-
-                      <div className="flex-1 rounded-xl overflow-hidden border border-slate-200 shadow-xs">
-                        <MaskViewer
-                          rawImageUrl={msg.raw_image_url}
-                          maskImageUrl={msg.mask_image_url}
-                          sampleId={activeSector}
-                          imageFile={msg.image_file}
-                          classes={msg.damage_stats?.classes || []}
-                          onError={setValidationError}
-                          onRegionSelect={(region) => {
-                            setAttachedRegion(region);
-                            setInputText(
-                              `Evaluate flood depth and structural passability at this ${region.class_name} zone.`
-                            );
-                          }}
-                        />
-                      </div>
+                    <div className="rounded-xl overflow-hidden border border-slate-200 shadow-xs">
+                      <MaskViewer
+                        rawImageUrl={msg.raw_image_url}
+                        maskImageUrl={msg.mask_image_url}
+                        sampleId={activeSector}
+                        imageFile={msg.image_file}
+                        classes={msg.damage_stats?.classes || []}
+                        onError={setValidationError}
+                        onRegionSelect={(region) => {
+                          setAttachedRegion(region);
+                          setInputText(
+                            `Evaluate flood depth and structural passability at this ${region.class_name} zone.`
+                          );
+                        }}
+                      />
                     </div>
                   )}
 
@@ -679,7 +608,7 @@ export default function ChatPage({ params }: ChatPageProps) {
                 )}
 
                 {/* Action Bar: Copy & Regenerate */}
-                <div className="flex items-center justify-between gap-3 pt-2 font-mono text-[11px] border-t border-slate-100">
+                <div className="flex items-center gap-3 pt-2 font-mono text-[11px] border-t border-slate-100">
                   <div className="flex items-center space-x-2">
                     <button
                       onClick={() => void handlePublishReport(msg)}
@@ -719,9 +648,6 @@ export default function ChatPage({ params }: ChatPageProps) {
                     </button>
                   </div>
 
-                  <span className="text-[11px] text-slate-500">
-                    Verified Grounded Assessment
-                  </span>
                 </div>
               </div>
             )}

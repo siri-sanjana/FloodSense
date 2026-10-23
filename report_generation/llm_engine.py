@@ -179,14 +179,16 @@ class FloodLLMEngine:
                 "severity_score": summary.get("damage_severity_score", 0.0),
                 "severity_tier": severity_label,
                 "triage_summary": (
-                    f"The vision model labeled this image {severity_label}; it estimated "
-                    f"{summary.get('flood_coverage_pct', 0.0)}% flood coverage "
-                    f"({summary.get('total_flood_area_m2', 0.0)} m²). This is an automated "
-                    "image assessment, not a verified emergency classification."
+                    f"The vision model assigned the uncalibrated image-class proxy "
+                    f"{severity_label}; predicted flood-class pixels cover "
+                    f"{summary.get('flood_coverage_pct', 0.0)}% of the image "
+                    f"({summary.get('total_flood_area_px', 0)} pixels). This is not "
+                    "a verified emergency classification or physical area estimate."
                 ),
             },
             "damage_assessment": {
-                "total_flood_area_m2": summary.get("total_flood_area_m2", 0.0),
+                "total_flood_area_m2": None,
+                "total_flood_area_px": summary.get("total_flood_area_px", 0),
                 "flood_coverage_pct": summary.get("flood_coverage_pct", 0.0),
                 "flooded_buildings_count": buildings.get("flooded_building_count", 0),
                 "non_flooded_buildings_count": buildings.get("non_flooded_building_count", 0),
@@ -229,7 +231,8 @@ class FloodLLMEngine:
         severity["severity_tier"] = summary.get("severity_label", "UNASSESSED")
         assessment = report.setdefault("damage_assessment", {})
         assessment.update({
-            "total_flood_area_m2": summary.get("total_flood_area_m2", 0.0),
+            "total_flood_area_m2": None,
+            "total_flood_area_px": summary.get("total_flood_area_px", 0),
             "flood_coverage_pct": summary.get("flood_coverage_pct", 0.0),
             "flooded_buildings_count": buildings.get("flooded_building_count", 0),
             "non_flooded_buildings_count": buildings.get("non_flooded_building_count", 0),
@@ -248,7 +251,7 @@ class FloodLLMEngine:
         triage = sev.get("triage_summary", "Incident evaluation underway.")
         
         da = report.get("damage_assessment", {})
-        flood_area = da.get("total_flood_area_m2", 0.0)
+        flood_area_px = da.get("total_flood_area_px", 0)
         flood_pct = da.get("flood_coverage_pct", 0.0)
         fb_cnt = da.get("flooded_buildings_count", 0)
         nfb_cnt = da.get("non_flooded_buildings_count", 0)
@@ -269,11 +272,11 @@ class FloodLLMEngine:
 
 ---
 
-## 2. Computer Vision Estimates (Not Ground-Truth Verified)
-- **Total Inundated Area:** **{flood_area:,.1f} sq. meters** ({flood_pct}% of total sector)
-- **Flooded Building Structures:** **{fb_cnt} units** (Safe/Dry buildings: {nfb_cnt} units)
-- **Road Inundation:** **{fr_pct}%** of local road network submerged
-- **Stranded / Submerged Vehicles:** **{veh_cnt} vehicles** identified in flood corridors
+## 2. Image-Mask Estimates (Not Ground-Truth Verified)
+- **Flood-class pixels:** **{flood_area_px:,} pixels** ({flood_pct}% of the analyzed image; not georeferenced area)
+- **Building-Flooded components:** **{fb_cnt}** (Building-Safe components: {nfb_cnt}); not verified object counts
+- **Road-Flooded class pixels:** **{fr_pct}%** of predicted Road pixels
+- **Vehicle/Vessel-class components:** **{veh_cnt}**; not verified vehicle detections
 - **Terrain & Environment:** {terrain}
 
 ---

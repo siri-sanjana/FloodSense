@@ -26,16 +26,16 @@ import {
 export interface ClassStats {
   floodedBuildings: number;
   totalBuildings: number;
-  floodedRoadsKm: number;
-  totalRoadsKm: number;
+  floodedRoadUnits: number;
+  totalRoadUnits: number;
   floodedVehicles: number;
   totalVehicles: number;
-  inundatedAreaHa: number;
+  simulatedAreaUnits: number;
   severityLevel: 'NORMAL' | 'ADVISORY' | 'CRITICAL' | 'CATASTROPHIC';
 }
 
 interface FloodDigitalTwin3DProps {
-  initialWaterLevel?: number; // meters (-0.5 to 3.5)
+  initialWaterLevel?: number; // Synthetic scenario scale (-0.5 to 3.5).
   sectorName?: string;
   onWaterLevelChange?: (level: number) => void;
   onStatsChange?: (stats: ClassStats) => void;
@@ -45,7 +45,7 @@ interface FloodDigitalTwin3DProps {
 
 export const FloodDigitalTwin3D: React.FC<FloodDigitalTwin3DProps> = ({
   initialWaterLevel = 1.8,
-  sectorName = 'Kochi Sector 10169 (Marine Drive)',
+  sectorName = 'FloodNet sample 10169',
   onWaterLevelChange,
   onStatsChange,
   onSwitchToSwipe,
@@ -71,11 +71,11 @@ export const FloodDigitalTwin3D: React.FC<FloodDigitalTwin3DProps> = ({
   const [stats, setStats] = useState<ClassStats>({
     floodedBuildings: 7,
     totalBuildings: 12,
-    floodedRoadsKm: 2.1,
-    totalRoadsKm: 4.6,
+    floodedRoadUnits: 2.1,
+    totalRoadUnits: 4.6,
     floodedVehicles: 4,
     totalVehicles: 8,
-    inundatedAreaHa: 3.82,
+    simulatedAreaUnits: 3.82,
     severityLevel: 'CRITICAL',
   });
 
@@ -533,13 +533,13 @@ export const FloodDigitalTwin3D: React.FC<FloodDigitalTwin3DProps> = ({
         }
 
         // Dynamic Lowland Road Inundation Evaluation
-        let floodedRoadsKm = 0;
+        let floodedRoadUnits = 0;
         if (roadsGroupRef.current) {
           roadsGroupRef.current.children.forEach((child) => {
             if (child instanceof THREE.Mesh && child.userData.type === 'road-low') {
               const elev = child.userData.elev;
               const isFlooded = currentWaterSurface > elev + 0.05;
-              if (isFlooded) floodedRoadsKm += 1.4;
+              if (isFlooded) floodedRoadUnits += 1.4;
 
               const mat = child.material as THREE.MeshStandardMaterial;
               // Submerged roads turn hazardous amber/yellow #CA8A04
@@ -568,7 +568,7 @@ export const FloodDigitalTwin3D: React.FC<FloodDigitalTwin3DProps> = ({
         }
 
         // Compute Live Class Inundation Metrics
-        const areaHa = parseFloat((1.2 + Math.max(0, targetWaterLevelRef.current) * 1.45).toFixed(2));
+        const areaUnits = parseFloat((1.2 + Math.max(0, targetWaterLevelRef.current) * 1.45).toFixed(2));
         const sevLevel: 'NORMAL' | 'ADVISORY' | 'CRITICAL' | 'CATASTROPHIC' =
           targetWaterLevelRef.current >= 2.5
             ? 'CATASTROPHIC'
@@ -581,11 +581,11 @@ export const FloodDigitalTwin3D: React.FC<FloodDigitalTwin3DProps> = ({
         const updatedStats: ClassStats = {
           floodedBuildings: floodedBldgsCount,
           totalBuildings: bldgData.length,
-          floodedRoadsKm: parseFloat(floodedRoadsKm.toFixed(1)),
-          totalRoadsKm: 4.6,
+          floodedRoadUnits: parseFloat(floodedRoadUnits.toFixed(1)),
+          totalRoadUnits: 4.6,
           floodedVehicles: floodedVehiclesCount,
           totalVehicles: 8,
-          inundatedAreaHa: areaHa,
+          simulatedAreaUnits: areaUnits,
           severityLevel: sevLevel,
         };
 
@@ -758,7 +758,7 @@ export const FloodDigitalTwin3D: React.FC<FloodDigitalTwin3DProps> = ({
           className={`flex items-center space-x-2 px-2 py-1 rounded transition-colors text-left ${visibleClasses.buildings ? 'bg-slate-100 text-slate-900 font-semibold' : 'text-slate-400'}`}
         >
           <span className="w-2.5 h-2.5 rounded-xs bg-red-600 shrink-0" />
-          <span>Buildings ({stats.floodedBuildings} Flooded / {stats.totalBuildings - stats.floodedBuildings} Safe)</span>
+          <span>Synthetic building models ({stats.floodedBuildings} / {stats.totalBuildings})</span>
         </button>
 
         <button
@@ -766,7 +766,7 @@ export const FloodDigitalTwin3D: React.FC<FloodDigitalTwin3DProps> = ({
           className={`flex items-center space-x-2 px-2 py-1 rounded transition-colors text-left ${visibleClasses.roads ? 'bg-slate-100 text-slate-900 font-semibold' : 'text-slate-400'}`}
         >
           <span className="w-2.5 h-2.5 rounded-xs bg-amber-500 shrink-0" />
-          <span>Roadways ({stats.floodedRoadsKm} km Flooded / 4.6 km)</span>
+          <span>Synthetic road units ({stats.floodedRoadUnits} / {stats.totalRoadUnits})</span>
         </button>
 
         <button
@@ -774,7 +774,7 @@ export const FloodDigitalTwin3D: React.FC<FloodDigitalTwin3DProps> = ({
           className={`flex items-center space-x-2 px-2 py-1 rounded transition-colors text-left ${visibleClasses.vehicles ? 'bg-slate-100 text-slate-900 font-semibold' : 'text-slate-400'}`}
         >
           <span className="w-2.5 h-2.5 rounded-xs bg-purple-600 shrink-0" />
-          <span>Vehicles ({stats.floodedVehicles} Flooded / 8)</span>
+          <span>Synthetic vehicle models ({stats.floodedVehicles} / {stats.totalVehicles})</span>
         </button>
 
         <button
@@ -782,7 +782,7 @@ export const FloodDigitalTwin3D: React.FC<FloodDigitalTwin3DProps> = ({
           className={`flex items-center space-x-2 px-2 py-1 rounded transition-colors text-left ${visibleClasses.trees ? 'bg-slate-100 text-slate-900 font-semibold' : 'text-slate-400'}`}
         >
           <span className="w-2.5 h-2.5 rounded-xs bg-emerald-600 shrink-0" />
-          <span>Tree Canopy (11 Stands)</span>
+          <span>Synthetic tree models</span>
         </button>
 
         <button
@@ -838,7 +838,7 @@ export const FloodDigitalTwin3D: React.FC<FloodDigitalTwin3DProps> = ({
         <div className="flex flex-wrap items-center gap-4 shrink-0 text-[11px] font-mono">
           <div className="flex items-center gap-1.5">
             <span className="text-slate-400">INUNDATION:</span>
-            <span className="text-slate-900 font-bold">{stats.inundatedAreaHa} Hectares</span>
+            <span className="text-slate-900 font-bold">{stats.simulatedAreaUnits} arbitrary units</span>
           </div>
 
           <div className="hidden sm:inline text-slate-300">&bull;</div>

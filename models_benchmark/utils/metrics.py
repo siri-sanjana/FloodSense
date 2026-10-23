@@ -13,13 +13,19 @@ CLASS_NAMES_FLOODNET = {
     9: "Grass"
 }
 
-def compute_segmentation_metrics(pred_mask, gt_mask):
+def compute_segmentation_metrics(pred_mask, gt_mask, ignore_index=255):
     """
     Computes binary segmentation metrics between predicted mask and ground truth mask.
-    Both masks should be binary (0 or 1) numpy arrays of the same shape.
+    Both masks should be binary (0 or 1) numpy arrays of the same shape. Ground
+    truth pixels equal to ignore_index are excluded.
     """
-    pred = (pred_mask > 0).astype(np.uint8)
-    gt = (gt_mask > 0).astype(np.uint8)
+    pred_mask = np.asarray(pred_mask)
+    gt_mask = np.asarray(gt_mask)
+    if pred_mask.shape != gt_mask.shape:
+        raise ValueError("pred_mask and gt_mask must have the same shape.")
+    valid = gt_mask != ignore_index
+    pred = (pred_mask[valid] > 0).astype(np.uint8)
+    gt = (gt_mask[valid] > 0).astype(np.uint8)
     
     tp = np.sum((pred == 1) & (gt == 1))
     fp = np.sum((pred == 1) & (gt == 0))
@@ -31,17 +37,17 @@ def compute_segmentation_metrics(pred_mask, gt_mask):
     # Intersection over Union (IoU)
     intersection = tp
     union = tp + fp + fn
-    iou = float(intersection / union) if union > 0 else 1.0
+    iou = float(intersection / union) if union > 0 else 0.0
     
     # Dice Coefficient / F1 Score
-    f1 = float(2 * tp / (2 * tp + fp + fn)) if (2 * tp + fp + fn) > 0 else 1.0
+    f1 = float(2 * tp / (2 * tp + fp + fn)) if (2 * tp + fp + fn) > 0 else 0.0
     
     # Precision & Recall
     precision = float(tp / (tp + fp)) if (tp + fp) > 0 else 0.0
     recall = float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
     
     # Pixel Accuracy
-    accuracy = float((tp + tn) / total_pixels)
+    accuracy = float((tp + tn) / total_pixels) if total_pixels else 0.0
     
     return {
         "iou": iou,
@@ -55,78 +61,120 @@ def compute_segmentation_metrics(pred_mask, gt_mask):
         "tn": int(tn)
     }
 
-def compute_multiclass_metrics(pred_mask, gt_mask, num_classes=10, class_names=CLASS_NAMES_FLOODNET):
+def compute_multiclass_metrics(
+    pred_mask,
+    gt_mask,
+    num_classes=10,
+    class_names=CLASS_NAMES_FLOODNET,
+    ignore_index=255,
+):
     """
-    Computes multi-class semantic segmentation metrics across all classes.
-    pred_mask and gt_mask are 2D integer arrays of same shape with values in range [0, num_classes-1].
+    Compute multi-class metrics; ground-truth ignore_index pixels are excluded.
+
+    Both masks are 2D integer arrays of the same shape; predictions and valid
+    ground-truth pixels must be in the range [0, num_classes - 1].
     """
-    pred = pred_mask.astype(np.int64)
-    gt = gt_mask.astype(np.int64)
-    
-    total_pixels = gt.size
-    correct_pixels = np.sum(pred == gt)
-    pixel_accuracy = float(correct_pixels / total_pixels) if total_pixels > 0 else 0.0
-    
+    pred = np.asarray(pred_mask)
+    gt = np.asarray(gt_mask)
+    if pred.shape != gt.shape or pred.ndim != 2:
+        raise ValueError("pred_mask and gt_mask must be 2D arrays with the same shape.")
+    if num_classes < 1:
+        raise ValueError("num_classes must be a positive integer.")
+    if not np.issubdtype(pred.dtype, np.integer) or not np.issubdtype(
+        gt.dtype, np.integer
+    ):
+        raise ValueError("pred_mask and gt_mask must contain integer class IDs.")
+    valid_gt = gt != ignore_index
+    if (
+        np.any(pred < 0)
+        or np.any(pred >= num_classes)
+        or np.any(gt[valid_gt] < 0)
+        or np.any(gt[valid_gt] >= num_classes)
+    ):
+        raise ValueError(f"Class IDs must be in the range [0, {num_classes - 1}].")
+
+    pred = pred[valid_gt]
+    gt = gt[valid_gt]
+    confusion = np.bincount(
+        gt.astype(np.int64, copy=False).ravel() * num_classes
+        + pred.astype(np.int64, copy=False).ravel(),
+        minlength=num_classes**2,
+    ).reshape(num_classes, num_classes)
+    return metrics_from_confusion(confusion, class_names)
+
+
+def metrics_from_confusion(confusion, class_names=CLASS_NAMES_FLOODNET):
+    """Calculate shared segmentation metrics from a dataset-level confusion matrix."""
+    confusion = np.asarray(confusion, dtype=np.int64)
+    if (
+        confusion.ndim != 2
+        or confusion.shape[0] != confusion.shape[1]
+        or np.any(confusion < 0)
+    ):
+        raise ValueError("confusion must be a non-negative square matrix.")
+    num_classes = confusion.shape[0]
+    true_positive = np.diag(confusion)
+    gt_counts = confusion.sum(axis=1)
+    pred_counts = confusion.sum(axis=0)
+    unions = gt_counts + pred_counts - true_positive
+    valid_classes = unions > 0
+    total_pixels = int(gt_counts.sum())
+    pixel_accuracy = (
+        float(true_positive.sum() / total_pixels) if total_pixels > 0 else 0.0
+    )
+
     per_class = {}
-    ious = []
-    f1_scores = []
-    precisions = []
-    recalls = []
-    class_weights = []
-    
+    ious = np.divide(
+        true_positive,
+        unions,
+        out=np.zeros(num_classes, dtype=np.float64),
+        where=valid_classes,
+    )
+    f1_denominators = gt_counts + pred_counts
+    f1_scores = np.divide(
+        2 * true_positive,
+        f1_denominators,
+        out=np.zeros(num_classes, dtype=np.float64),
+        where=f1_denominators > 0,
+    )
+    precisions = np.divide(
+        true_positive,
+        pred_counts,
+        out=np.zeros(num_classes, dtype=np.float64),
+        where=pred_counts > 0,
+    )
+    recalls = np.divide(
+        true_positive,
+        gt_counts,
+        out=np.zeros(num_classes, dtype=np.float64),
+        where=gt_counts > 0,
+    )
+
     for c in range(num_classes):
         c_name = class_names.get(c, f"Class_{c}")
-        
-        pred_c = (pred == c)
-        gt_c = (gt == c)
-        
-        tp = np.sum(pred_c & gt_c)
-        fp = np.sum(pred_c & ~gt_c)
-        fn = np.sum(~pred_c & gt_c)
-        
-        gt_count = int(np.sum(gt_c))
-        class_weights.append(gt_count)
-        
-        union = tp + fp + fn
-        if union > 0:
-            c_iou = float(tp / union)
-            c_f1 = float(2 * tp / (2 * tp + fp + fn)) if (2 * tp + fp + fn) > 0 else 0.0
-            c_precision = float(tp / (tp + fp)) if (tp + fp) > 0 else 0.0
-            c_recall = float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
-            ious.append(c_iou)
-            f1_scores.append(c_f1)
-            precisions.append(c_precision)
-            recalls.append(c_recall)
-        else:
-            # Class not present in GT nor in Pred
-            c_iou = 1.0
-            c_f1 = 1.0
-            c_precision = 1.0
-            c_recall = 1.0
-            
         per_class[c_name] = {
             "class_id": c,
-            "iou": c_iou,
-            "f1_score": c_f1,
-            "precision": c_precision,
-            "recall": c_recall,
-            "gt_pixel_count": gt_count,
-            "pred_pixel_count": int(np.sum(pred_c))
+            "iou": float(ious[c]),
+            "f1_score": float(f1_scores[c]),
+            "precision": float(precisions[c]),
+            "recall": float(recalls[c]),
+            "gt_pixel_count": int(gt_counts[c]),
+            "pred_pixel_count": int(pred_counts[c]),
+            "true_positive_pixel_count": int(true_positive[c]),
         }
-        
-    # Mean IoU and Macro F1
-    mean_iou = float(np.mean(ious)) if ious else 0.0
-    macro_f1 = float(np.mean(f1_scores)) if f1_scores else 0.0
-    macro_precision = float(np.mean(precisions)) if precisions else 0.0
-    macro_recall = float(np.mean(recalls)) if recalls else 0.0
-    
-    # Frequency-weighted IoU
-    total_gt = sum(class_weights)
-    if total_gt > 0 and len(ious) == num_classes:
-        fw_iou = float(sum(w * ious[i] for i, w in enumerate(class_weights)) / total_gt)
-    else:
-        fw_iou = mean_iou
-        
+
+    mean_iou = float(ious[valid_classes].mean()) if valid_classes.any() else 0.0
+    macro_f1 = float(f1_scores[valid_classes].mean()) if valid_classes.any() else 0.0
+    macro_precision = (
+        float(precisions[valid_classes].mean()) if valid_classes.any() else 0.0
+    )
+    macro_recall = (
+        float(recalls[valid_classes].mean()) if valid_classes.any() else 0.0
+    )
+    fw_iou = (
+        float(np.sum(ious * gt_counts) / total_pixels) if total_pixels > 0 else 0.0
+    )
+
     return {
         "mIoU": mean_iou,
         "macro_f1": macro_f1,
@@ -134,7 +182,8 @@ def compute_multiclass_metrics(pred_mask, gt_mask, num_classes=10, class_names=C
         "macro_recall": macro_recall,
         "frequency_weighted_iou": fw_iou,
         "overall_pixel_accuracy": pixel_accuracy,
-        "per_class": per_class
+        "per_class": per_class,
+        "confusion_matrix": confusion.astype(np.int64).tolist(),
     }
 
 def aggregate_metrics(metrics_list):
@@ -144,13 +193,29 @@ def aggregate_metrics(metrics_list):
     if not metrics_list:
         return {}
         
-    keys = ["iou", "f1_score", "precision", "recall", "pixel_accuracy"]
-    aggregated = {}
-    for k in keys:
-        values = [m[k] for m in metrics_list if k in m]
-        aggregated[k] = float(np.mean(values)) if values else 0.0
-        
-    return aggregated
+    counts = {
+        key: sum(metric[key] for metric in metrics_list)
+        for key in ("tp", "fp", "fn", "tn")
+    }
+    tp, fp, fn, tn = (
+        counts["tp"],
+        counts["fp"],
+        counts["fn"],
+        counts["tn"],
+    )
+    union = tp + fp + fn
+    f1_denominator = 2 * tp + fp + fn
+    predicted_positive = tp + fp
+    actual_positive = tp + fn
+    total_pixels = tp + fp + fn + tn
+    return {
+        **counts,
+        "iou": float(tp / union) if union else 0.0,
+        "f1_score": float(2 * tp / f1_denominator) if f1_denominator else 0.0,
+        "precision": float(tp / predicted_positive) if predicted_positive else 0.0,
+        "recall": float(tp / actual_positive) if actual_positive else 0.0,
+        "pixel_accuracy": float((tp + tn) / total_pixels) if total_pixels else 0.0,
+    }
 
 def aggregate_multiclass_metrics(multiclass_list):
     """
@@ -159,25 +224,25 @@ def aggregate_multiclass_metrics(multiclass_list):
     if not multiclass_list:
         return {}
         
-    aggregated = {
-        "mIoU": float(np.mean([m["mIoU"] for m in multiclass_list])),
-        "macro_f1": float(np.mean([m["macro_f1"] for m in multiclass_list])),
-        "macro_precision": float(np.mean([m["macro_precision"] for m in multiclass_list])),
-        "macro_recall": float(np.mean([m["macro_recall"] for m in multiclass_list])),
-        "frequency_weighted_iou": float(np.mean([m["frequency_weighted_iou"] for m in multiclass_list])),
-        "overall_pixel_accuracy": float(np.mean([m["overall_pixel_accuracy"] for m in multiclass_list])),
-        "per_class": {}
+    if any("confusion_matrix" not in metrics for metrics in multiclass_list):
+        raise ValueError(
+            "Each metric result must include its confusion_matrix for aggregation."
+        )
+    matrices = [np.asarray(metrics["confusion_matrix"]) for metrics in multiclass_list]
+    shape = matrices[0].shape
+    if (
+        len(shape) != 2
+        or shape[0] != shape[1]
+        or any(matrix.shape != shape for matrix in matrices)
+    ):
+        raise ValueError("All confusion matrices must have the same square shape.")
+    confusion = np.sum(matrices, axis=0, dtype=np.int64)
+    class_ids = {
+        value["class_id"]: name
+        for name, value in multiclass_list[0]["per_class"].items()
     }
-    
-    sample_classes = multiclass_list[0]["per_class"].keys()
-    for c_name in sample_classes:
-        aggregated["per_class"][c_name] = {
-            "class_id": multiclass_list[0]["per_class"][c_name]["class_id"],
-            "iou": float(np.mean([m["per_class"][c_name]["iou"] for m in multiclass_list])),
-            "f1_score": float(np.mean([m["per_class"][c_name]["f1_score"] for m in multiclass_list])),
-            "precision": float(np.mean([m["per_class"][c_name]["precision"] for m in multiclass_list])),
-            "recall": float(np.mean([m["per_class"][c_name]["recall"] for m in multiclass_list]))
-        }
-        
-    return aggregated
-
+    class_names = {
+        class_id: class_ids.get(class_id, f"Class_{class_id}")
+        for class_id in range(shape[0])
+    }
+    return metrics_from_confusion(confusion, class_names)

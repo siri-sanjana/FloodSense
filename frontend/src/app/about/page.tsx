@@ -65,7 +65,7 @@ export default function AboutStoryPage() {
               Water doesn’t wait.
             </h1>
             <p className="font-sans text-sm sm:text-base text-silt-400 max-w-xl leading-relaxed pt-2">
-              When monsoon cloudbursts overwhelm riverine dykes, municipal gauge telemetry fails. Survival is measured in the minutes required to verify which roads still stand above the waterline.
+              FloodSense is a prototype for reviewing user-supplied flood imagery. Its image predictions can support analysis, but they do not replace field observations or calibrated measurements.
             </p>
             <div className="pt-6 font-mono text-xs text-silt-500 flex items-center space-x-2">
               <span className="animate-bounce text-[#D9822B]">&darr;</span>
@@ -85,25 +85,24 @@ export default function AboutStoryPage() {
             </h2>
             <div className="space-y-4 font-sans text-sm sm:text-base text-silt-300 leading-relaxed">
               <p>
-                In standard flood operations, optical satellite passes arrive 48 hours too late due to persistent cloud cover. First responders rely on fragmented radio chatter and unverified civilian telephone reports.
+                Flood imagery can help teams review visible conditions, but a single image may lack location, timing, scale, and ground-truth context.
               </p>
               <p className="text-silt-400">
-                Ground electrical isolation is delayed. Motorized inflatable boats navigate blindly over submerged iron railings, road signposts, and drowning automobiles.
+                FloodSense returns image-level model estimates. Operational decisions require independent verification using trusted local information.
               </p>
             </div>
-            {/* Real Counter Metric (Rust Accent) */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-6 pt-6 hairline-t border-abyss-800 font-mono">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 pt-6 hairline-t border-abyss-800 font-mono">
               <div>
-                <div className="text-3xl sm:text-4xl font-serif text-[#D9822B]">14.2 km</div>
-                <div className="text-[11px] text-silt-500 uppercase mt-1">Average Cutoff Feeder Road</div>
+                <div className="text-lg font-serif text-[#D9822B]">Image-based</div>
+                <div className="text-[11px] text-silt-500 uppercase mt-1">Predictions are not field reports</div>
               </div>
               <div>
-                <div className="text-3xl sm:text-4xl font-serif text-[#D9822B]">1.65 m</div>
-                <div className="text-[11px] text-silt-500 uppercase mt-1">Ground Floor Ingress Depth</div>
+                <div className="text-lg font-serif text-[#D9822B]">Uncalibrated</div>
+                <div className="text-[11px] text-silt-500 uppercase mt-1">No physical area or depth by default</div>
               </div>
               <div>
-                <div className="text-3xl sm:text-4xl font-serif text-silt-200">60 min</div>
-                <div className="text-[11px] text-silt-500 uppercase mt-1">NDMA Mandated De-energize</div>
+                <div className="text-lg font-serif text-silt-200">Verify independently</div>
+                <div className="text-[11px] text-silt-500 uppercase mt-1">Before operational use</div>
               </div>
             </div>
           </div>
@@ -113,13 +112,13 @@ export default function AboutStoryPage() {
         <section className="min-h-screen flex items-center justify-end p-8 sm:p-20 relative">
           <div className="max-w-2xl space-y-6 bg-abyss-950/70 backdrop-blur-xs p-8 sm:p-12 hairline-all border-abyss-800 text-right">
             <div className="text-xs font-mono text-[#D9822B] uppercase tracking-widest">
-              02 / The Sensor &amp; Fine-Tuned SegFormer
+              02 / FloodNet Semantic Segmentation
             </div>
             <h2 className="font-serif text-4xl sm:text-6xl text-silt-100 font-normal leading-tight">
               Eyes through the deluge.
             </h2>
             <p className="font-sans text-sm sm:text-base text-silt-300 leading-relaxed text-left">
-              Small tactical UAVs fly below cloud ceilings. As the drone orbits, our fine-tuned <strong>SegFormer MiT-B0</strong> sweeps the frame, resolving 10 semantic classes without human labeling latency:
+              FloodSense uses FloodNet's ten-class aerial scene labels. The active backend depends on its runtime configuration; the deployed CPU container disables heavy learned segmentation and can use classical CV instead:
             </p>
             <div className="flex flex-wrap justify-end gap-2 text-[11px] font-mono">
               <span className="px-2 py-1 bg-red-950/60 hairline-all border-red-800 text-red-300">Building-Flooded</span>
@@ -129,9 +128,9 @@ export default function AboutStoryPage() {
               <span className="px-2 py-1 bg-abyss-900 hairline-all border-abyss-700 text-silt-400">Building-Safe</span>
             </div>
             <div className="p-4 bg-abyss-900/60 hairline-all border-abyss-700 font-mono text-xs text-left space-y-1">
-              <div className="text-[#D9822B] font-semibold">Fine-Tuned Verification Benchmark:</div>
-              <div className="text-silt-400">Multi-Class mIoU: <strong>0.4797</strong> (up from 0.0937 pre-trained baseline)</div>
-              <div className="text-silt-400">Pixel Accuracy: <strong>83.46%</strong> across high-res DJI Phantom 4 UAV imagery.</div>
+              <div className="text-[#D9822B] font-semibold">Benchmark status:</div>
+              <div className="text-silt-400">Historical results are not independently reproducible from the current checkout because labeled validation data is absent.</div>
+              <div className="text-silt-400">No mIoU or accuracy claim is currently verified for the deployed backend.</div>
             </div>
           </div>
         </section>
@@ -140,25 +139,25 @@ export default function AboutStoryPage() {
         <section className="min-h-screen flex items-center p-8 sm:p-20 relative">
           <div className="max-w-2xl space-y-6 bg-abyss-950/70 backdrop-blur-xs p-8 sm:p-12 hairline-all border-abyss-800">
             <div className="text-xs font-mono text-[#D9822B] uppercase tracking-widest">
-              03 / Statutory Protocol Engine
+              03 / Reference Retrieval &amp; Reports
             </div>
             <h2 className="font-serif text-4xl sm:text-6xl text-silt-100 font-normal leading-tight">
-              Code grounded in law.
+              Context, with its source.
             </h2>
             <p className="font-sans text-sm sm:text-base text-silt-300 leading-relaxed">
-              Detection without directive is useless in crisis. Extracted damage metrics query a ChromaDB semantic index containing official government flood protocols:
+              When configured, retrieval can provide reference text alongside image analysis. Retrieved documents are context, not verification of conditions shown in an image.
             </p>
             <div className="space-y-3 font-mono text-xs">
               <div className="p-3 bg-abyss-900 hairline-all border-abyss-700 space-y-1">
-                <span className="text-[10px] text-[#D9822B]">NDMA Urban Flood SOP Section 4.2.1</span>
+                <span className="text-[10px] text-[#D9822B]">Retrieval status</span>
                 <p className="font-sans text-xs text-silt-300">
-                  Mandatory electrical isolation protocols triggered automatically when water depth reaches ground meter clearance limits.
+                  The backend may use its configured document index. The availability and provenance of retrieved references can vary by deployment.
                 </p>
               </div>
               <div className="p-3 bg-abyss-900 hairline-all border-abyss-700 space-y-1">
-                <span className="text-[10px] text-[#D9822B]">NDRF Tactical Rescue SOP 08/2022</span>
+                <span className="text-[10px] text-[#D9822B]">Safety limitation</span>
                 <p className="font-sans text-xs text-silt-300">
-                  Vehicle passability safety limits (&gt;0.45m depth classified impassable for wheeled ambulance extraction).
+                  Do not treat generated recommendations, citations, or image-class estimates as confirmed emergency instructions.
                 </p>
               </div>
             </div>
@@ -169,21 +168,21 @@ export default function AboutStoryPage() {
         <section className="min-h-screen flex items-center justify-end p-8 sm:p-20 relative">
           <div className="max-w-2xl space-y-6 bg-abyss-950/70 backdrop-blur-xs p-8 sm:p-12 hairline-all border-abyss-800">
             <div className="text-xs font-mono text-[#D9822B] uppercase tracking-widest">
-              04 / The Severity Tide Gauge
+              04 / The Image-Class Proxy
             </div>
             <h2 className="font-serif text-4xl sm:text-6xl text-silt-100 font-normal leading-tight">
-              The signature water mark.
+              A visual summary, not a water gauge.
             </h2>
             <p className="font-sans text-sm sm:text-base text-silt-300 leading-relaxed">
-              Beside every drone inspection runs the FloodSense vertical water gauge. Rather than a vague percentage, it scales precisely with computed building inundation depths, road severance, and riverine basin stage levels.
+              The score summarizes a heuristic derived from predicted image classes. It is not calibrated to flood depth, water level, infrastructure damage, or incident severity.
             </p>
             <div className="p-4 bg-abyss-900 hairline-all border-abyss-700 flex items-center justify-between font-mono text-xs">
               <div>
-                <div className="text-silt-500 text-[10px] uppercase">Peak Flood Hazard Score</div>
-                <div className="text-2xl font-serif text-[#D9822B]">TIDE 8.4 / 10.0</div>
+                <div className="text-silt-500 text-[10px] uppercase">Example score</div>
+                <div className="text-2xl font-serif text-[#D9822B]">Not a field measurement</div>
               </div>
               <span className="px-2 py-1 bg-[#D9822B]/10 text-[#D9822B] hairline-all border-[#D9822B]/30 uppercase text-[10px]">
-                CRITICAL EVACUATION TIER
+                UNCALIBRATED PROXY
               </span>
             </div>
           </div>
@@ -206,20 +205,20 @@ export default function AboutStoryPage() {
                 {
                   role: 'Disaster Responders',
                   tag: 'TACTICAL COMMAND',
-                  quote: '“We can verify whether an ambulance will float off an arterial bridge before dispatching the team.”',
-                  author: 'Insp. R. Verma, NDRF 4th Bn',
+                  quote: 'Review image-level predictions alongside field observations and trusted local information.',
+                  author: 'Potential workflow',
                 },
                 {
                   role: 'Hydrology Researchers',
                   tag: 'ANALYTICAL SCIENCE',
-                  quote: '“Comparing drone passes 6 hours apart gives us exact volumetric surface expansion curves.”',
-                  author: 'Dr. Aris Thorne, Riverine Modeling Institute',
+                  quote: 'Use appropriately labeled datasets and documented evaluation splits to measure model performance.',
+                  author: 'Potential workflow',
                 },
                 {
                   role: 'Civil Observers',
                   tag: 'COMMUNITY ADVISORY',
-                  quote: '“Anonymized verified field SITREPs replace social media rumors with statutory directives.”',
-                  author: 'Meera Nair, Coastal Resident Council',
+                  quote: 'Share observations with their source, time, and location; model output alone does not verify a report.',
+                  author: 'Potential workflow',
                 },
               ].map((card, i) => (
                 <div

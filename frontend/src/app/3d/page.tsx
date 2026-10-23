@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -26,7 +26,11 @@ import {
   TrendingUp,
   MapPin,
   Camera,
-  Crosshair
+  Crosshair,
+  Upload,
+  Sparkles,
+  RefreshCw,
+  X
 } from 'lucide-react';
 import { FloodSenseLogo } from '../../components/ui/FloodSenseLogo';
 import {
@@ -50,8 +54,10 @@ import {
   type HydrologyMetrics
 } from '../../lib/hydrology';
 
+type ActiveImageId = '10169' | '10815' | '6423' | 'uploaded';
+
 export default function Standalone3DDigitalTwinPage() {
-  const [selectedSector, setSelectedSector] = useState<FloodNetSampleId>('10169');
+  const [activeImageId, setActiveImageId] = useState<ActiveImageId>('10169');
   const [activeView, setActiveView] = useState<'3d' | 'swipe' | 'image3d'>('3d');
   const [currentWaterLevel, setCurrentWaterLevel] = useState<number>(1.8);
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>('orbit');
@@ -62,6 +68,7 @@ export default function Standalone3DDigitalTwinPage() {
     imageUrl: string;
     segmentationUrl: string;
     classMaskUrl: string;
+    depthMapUrl: string | null;
     imageWidth: number;
     imageHeight: number;
     modelName: string;
@@ -84,35 +91,70 @@ export default function Standalone3DDigitalTwinPage() {
     severityLevel: 'CRITICAL',
   });
 
-  const SECTORS = [
-    {
+  const SECTORS: Record<'10169' | '10815' | '6423', {
+    id: '10169' | '10815' | '6423';
+    title: string;
+    image: string;
+    mask: string;
+    scene: string;
+    waterBaseline: number;
+    basinType: string;
+    structuresCount: number;
+    criticalThreshold: number;
+    description: string;
+  }> = {
+    '10169': {
       ...FLOODNET_SAMPLES['10169'],
+      id: '10169',
       waterBaseline: 1.8,
       basinType: FLOODNET_SAMPLES['10169'].scene,
       structuresCount: 12,
       criticalThreshold: 1.2,
       description: 'Calibrated photogrammetric DSM with 0.5m contouring and critical road submersion at +1.2m.',
     },
-    {
+    '10815': {
       ...FLOODNET_SAMPLES['10815'],
+      id: '10815',
       waterBaseline: 2.2,
       basinType: FLOODNET_SAMPLES['10815'].scene,
       structuresCount: 15,
       criticalThreshold: 1.2,
       description: 'High-density residential floodplain; drainage canals overtop into residential streets.',
     },
-    {
+    '6423': {
       ...FLOODNET_SAMPLES['6423'],
+      id: '6423',
       waterBaseline: 1.0,
       basinType: FLOODNET_SAMPLES['6423'].scene,
       structuresCount: 8,
       criticalThreshold: 1.2,
       description: 'Perimeter retention basin swale with agricultural buffer.',
     },
-  ];
+  };
 
-  const activeSector = SECTORS.find((s) => s.id === selectedSector)!;
-  const selectedImageUrl = uploadedImageUrl || activeSector.image;
+  const activeSector = activeImageId !== 'uploaded' ? SECTORS[activeImageId] : SECTORS['10169'];
+
+  // Current active raw image URL
+  const currentRawImageUrl = useMemo(() => {
+    if (activeImageId === 'uploaded' && uploadedImageUrl) return uploadedImageUrl;
+    return activeSector.image;
+  }, [activeImageId, uploadedImageUrl, activeSector.image]);
+
+  // Current active segmentation mask URL
+  const currentMaskImageUrl = useMemo(() => {
+    if (activeImageId === 'uploaded') {
+      return derivedAssets?.segmentationUrl || derivedAssets?.classMaskUrl || '';
+    }
+    return activeSector.mask;
+  }, [activeImageId, derivedAssets, activeSector.mask]);
+
+  // Active title
+  const activeTitle = useMemo(() => {
+    if (activeImageId === 'uploaded') {
+      return uploadedImage ? uploadedImage.name : 'Uploaded Survey Capture';
+    }
+    return activeSector.title;
+  }, [activeImageId, uploadedImage, activeSector.title]);
 
   // Real-time engineering hydrology metrics derived from DSM
   const hydroMetrics: HydrologyMetrics = useMemo(() => {
@@ -124,36 +166,58 @@ export default function Standalone3DDigitalTwinPage() {
     return getHypsometricTable();
   }, []);
 
-  const stagePosition = Math.min(100, Math.max(0, (currentWaterLevel / 4.0) * 100));
-
-  React.useEffect(() => {
+  // Update object URL when file changes
+  useEffect(() => {
     if (!uploadedImage) {
       setUploadedImageUrl(null);
+      if (activeImageId === 'uploaded') setActiveImageId('10169');
       return;
     }
     const objectUrl = URL.createObjectURL(uploadedImage);
     setUploadedImageUrl(objectUrl);
+    setActiveImageId('uploaded');
     return () => URL.revokeObjectURL(objectUrl);
   }, [uploadedImage]);
 
-  const buildImage3d = async () => {
+  // Automated or manual image 3D reconstruction & segmentation
+  const buildImage3d = async (forcedView?: 'image3d' | 'swipe') => {
     setImage3dError(null);
     setIsBuildingImage3d(true);
     try {
-      const image = uploadedImage || await loadFloodNetSampleImage(selectedSector);
-      const input = { image };
-      const segmentation = await api.segment({ ...input, model: segmentationModel });
+      const isUpload = activeImageId === 'uploaded' && uploadedImage;
+      const imageToProcess = isUpload
+        ? uploadedImage
+        : await loadFloodNetSampleImage(activeImageId === 'uploaded' ? '10169' : activeImageId);
+
+      const input = { image: imageToProcess };
+
+      // Call segmentation and relative depth in parallel
+      const [segmentation, depthResult] = await Promise.all([
+        api.segment({ ...input, model: segmentationModel }),
+        api.depth(input).catch(() => null),
+      ]);
+
+      const sourceUrl = isUpload && uploadedImageUrl
+        ? uploadedImageUrl
+        : SECTORS[activeImageId === 'uploaded' ? '10169' : activeImageId].image;
+
       setDerivedAssets({
-        imageUrl: selectedImageUrl,
+        imageUrl: sourceUrl,
         segmentationUrl: segmentation.overlay_url,
         classMaskUrl: segmentation.class_mask_url,
+        depthMapUrl: depthResult ? depthResult.depth_map_url : null,
         imageWidth: segmentation.image_size.width,
         imageHeight: segmentation.image_size.height,
         modelName: segmentation.model_display_name,
       });
-      setActiveView('image3d');
+
+      if (forcedView) {
+        setActiveView(forcedView);
+      } else {
+        setActiveView('image3d');
+      }
     } catch (error) {
-      setImage3dError(error instanceof Error ? error.message : 'Could not build the image-derived 3D view.');
+      setImage3dError(error instanceof Error ? error.message : 'Could not reconstruct 3D surface.');
     } finally {
       setIsBuildingImage3d(false);
     }
@@ -229,147 +293,171 @@ export default function Standalone3DDigitalTwinPage() {
         </div>
       </header>
 
-      {/* ────────────────── SECTOR SELECTION & VIEW SWITCHER ────────────────── */}
+      {/* ────────────────── ACTIVE IMAGE SELECTOR & WORKBENCH TABS ────────────────── */}
       <div className="bg-white border-b border-slate-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-4 font-mono text-xs">
-          <div className="basis-full flex flex-wrap items-center justify-between text-[11px] text-slate-500 gap-2 border-b border-slate-100 pb-2">
-            <span>
-              <strong>Engineering Standard:</strong> Calibrated photogrammetric DSM with 0.5m contour intervals and stage-storage rating curves.
-            </span>
-            <span className="text-cyan-800 font-semibold">
-              Tile: 100m x 100m (1.00 ha) &bull; Nominal GSD: 2.5 cm/px
-            </span>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 space-y-3 font-mono text-xs">
+          {/* Top row: Image Selector and View Modes */}
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            {/* Active Image Switcher (Synchronized Across All Tabs) */}
+            <div className="flex items-center space-x-2 overflow-x-auto pb-1 sm:pb-0">
+              <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Active Scene:</span>
+
+              {/* Uploaded Image Pill (if present) */}
+              {uploadedImage && (
+                <button
+                  onClick={() => {
+                    setActiveImageId('uploaded');
+                  }}
+                  className={`px-3 py-1.5 rounded-lg transition-all flex items-center space-x-1.5 shrink-0 cursor-pointer border ${
+                    activeImageId === 'uploaded'
+                      ? 'bg-cyan-50 border-cyan-600 text-cyan-950 font-bold shadow-2xs ring-1 ring-cyan-600'
+                      : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                  }`}
+                >
+                  <Upload className="w-3 h-3 text-cyan-600" />
+                  <span className="max-w-[130px] truncate">{uploadedImage.name}</span>
+                  <span className="text-[9px] bg-cyan-100 text-cyan-800 px-1 py-0.2 rounded font-bold uppercase">Active</span>
+                </button>
+              )}
+
+              {/* Sample Images */}
+              {(['10169', '10815', '6423'] as const).map((sId) => (
+                <button
+                  key={sId}
+                  onClick={() => {
+                    setActiveImageId(sId);
+                    setCurrentWaterLevel(SECTORS[sId].waterBaseline);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg transition-all flex items-center space-x-2 shrink-0 cursor-pointer border ${
+                    activeImageId === sId
+                      ? 'bg-cyan-50 border-cyan-600 text-cyan-950 font-bold shadow-2xs ring-1 ring-cyan-600'
+                      : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                  }`}
+                >
+                  <span className={`w-2 h-2 rounded-full ${activeImageId === sId ? 'bg-cyan-600' : 'bg-slate-300'}`} />
+                  <span>Image {sId}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* View Mode Switcher */}
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setActiveView('3d')}
+                className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 font-bold transition-all border cursor-pointer ${
+                  activeView === '3d'
+                    ? 'bg-slate-900 border-slate-900 text-white shadow-xs'
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <Box className="w-3.5 h-3.5 text-cyan-400" />
+                <span>3D Hydro Twin</span>
+              </button>
+              <button
+                onClick={() => {
+                  if (activeImageId === 'uploaded' && !derivedAssets) {
+                    void buildImage3d('swipe');
+                  } else {
+                    setActiveView('swipe');
+                  }
+                }}
+                className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 font-bold transition-all border cursor-pointer ${
+                  activeView === 'swipe'
+                    ? 'bg-cyan-600 border-cyan-600 text-white shadow-xs'
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <Split className="w-3.5 h-3.5" />
+                <span>Swipe for Segmentation</span>
+              </button>
+              <button
+                onClick={() => {
+                  if (derivedAssets) setActiveView('image3d');
+                  else void buildImage3d('image3d');
+                }}
+                disabled={isBuildingImage3d}
+                className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 font-bold transition-all border cursor-pointer ${
+                  activeView === 'image3d'
+                    ? 'bg-violet-700 border-violet-700 text-white shadow-xs'
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                } disabled:cursor-wait disabled:opacity-60`}
+              >
+                <Activity className="w-3.5 h-3.5" />
+                <span>{isBuildingImage3d ? 'Reconstructing…' : 'Photogrammetric 3D'}</span>
+              </button>
+            </div>
           </div>
 
-          {/* Active Sector Selection */}
-          <div className="flex items-center space-x-3 overflow-x-auto pb-1 sm:pb-0">
-            <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Survey Sector:</span>
-            {SECTORS.map((sec) => (
+          {/* Bottom row: Upload tool & model selection */}
+          <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-slate-100 text-xs">
+            <label className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-slate-700 hover:bg-slate-50 cursor-pointer shadow-2xs">
+              <Upload className="w-3.5 h-3.5 text-cyan-600" />
+              <span>{uploadedImage ? `Uploaded: ${uploadedImage.name}` : 'Upload custom aerial survey image'}</span>
+              <input
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                disabled={isBuildingImage3d}
+                onChange={(event) => {
+                  const file = event.target.files?.[0] || null;
+                  if (file) {
+                    setUploadedImage(file);
+                    setDerivedAssets(null);
+                    setImage3dError(null);
+                  }
+                }}
+              />
+            </label>
+
+            {uploadedImage && (
               <button
-                key={sec.id}
+                type="button"
+                disabled={isBuildingImage3d}
                 onClick={() => {
-                  setSelectedSector(sec.id);
-                  setCurrentWaterLevel(sec.waterBaseline);
                   setUploadedImage(null);
                   setDerivedAssets(null);
                   setImage3dError(null);
+                  setActiveImageId('10169');
                   setActiveView('3d');
                 }}
-                disabled={isBuildingImage3d}
-                className={`px-3 py-1.5 rounded-lg transition-all flex items-center space-x-2 shrink-0 cursor-pointer border ${
-                  selectedSector === sec.id
-                    ? 'bg-cyan-50 border-cyan-600 text-cyan-950 font-bold shadow-2xs'
-                    : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                }`}
+                className="text-slate-500 hover:text-red-600 disabled:opacity-50 flex items-center space-x-1 cursor-pointer"
               >
-                <span className={`w-2 h-2 rounded-full ${selectedSector === sec.id ? 'bg-cyan-600' : 'bg-slate-300'}`} />
-                <span>Sector {sec.id}</span>
+                <X className="w-3.5 h-3.5" />
+                <span>Clear upload</span>
               </button>
-            ))}
-          </div>
+            )}
 
-          {/* View Mode Switcher */}
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={() => setActiveView('3d')}
-              className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 font-bold transition-all border cursor-pointer ${
-                activeView === '3d'
-                  ? 'bg-slate-900 border-slate-900 text-white shadow-xs'
-                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <Box className="w-3.5 h-3.5 text-cyan-400" />
-              <span>3D Hydro Twin</span>
-            </button>
-            <button
-              onClick={() => setActiveView('swipe')}
-              className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 font-bold transition-all border cursor-pointer ${
-                activeView === 'swipe'
-                  ? 'bg-cyan-600 border-cyan-600 text-white shadow-xs'
-                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <Split className="w-3.5 h-3.5" />
-              <span>Swipe Segmentation</span>
-            </button>
-            <button
-              onClick={() => {
-                if (derivedAssets) setActiveView('image3d');
-                else void buildImage3d();
-              }}
-              disabled={isBuildingImage3d}
-              className={`px-3 py-1.5 rounded-lg flex items-center space-x-1.5 font-bold transition-all border cursor-pointer ${
-                activeView === 'image3d'
-                  ? 'bg-violet-700 border-violet-700 text-white shadow-xs'
-                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-              } disabled:cursor-wait disabled:opacity-60`}
-            >
-              <Activity className="w-3.5 h-3.5" />
-              <span>{isBuildingImage3d ? 'Building…' : 'Image 2.5D'}</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Upload & Secondary Controls */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 pb-3 flex flex-wrap items-center gap-3 text-xs">
-          <label className="inline-flex items-center gap-2 rounded border border-slate-300 bg-white px-3 py-1.5 text-slate-700 hover:bg-slate-50 cursor-pointer">
-            <span>{uploadedImage ? uploadedImage.name : 'Use current sample or upload survey aerial'}</span>
-            <input
-              type="file"
-              accept="image/*"
-              className="sr-only"
-              disabled={isBuildingImage3d}
-              onChange={(event) => {
-                setUploadedImage(event.target.files?.[0] || null);
-                setDerivedAssets(null);
-                setImage3dError(null);
-                setActiveView('3d');
-              }}
-            />
-          </label>
-          {uploadedImage && (
             <button
               type="button"
+              onClick={() => void buildImage3d()}
               disabled={isBuildingImage3d}
-              onClick={() => {
-                setUploadedImage(null);
-                setDerivedAssets(null);
-                setImage3dError(null);
-                setActiveView('3d');
-              }}
-              className="text-slate-500 hover:text-slate-800 disabled:opacity-50 cursor-pointer"
+              className="rounded-lg bg-violet-700 px-3 py-1.5 font-semibold text-white hover:bg-violet-800 disabled:cursor-wait disabled:opacity-60 flex items-center space-x-1.5 shadow-2xs cursor-pointer"
             >
-              Clear upload
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>{isBuildingImage3d ? 'Generating Photogrammetric 3D…' : 'Reconstruct Photogrammetric 3D'}</span>
             </button>
-          )}
-          <button
-            type="button"
-            onClick={() => void buildImage3d()}
-            disabled={isBuildingImage3d}
-            className="rounded bg-violet-700 px-3 py-1.5 font-semibold text-white hover:bg-violet-800 disabled:cursor-wait disabled:opacity-60 cursor-pointer"
-          >
-            {isBuildingImage3d ? 'Running segmentation…' : 'Generate image-derived 3D'}
-          </button>
-          <label className="flex items-center gap-2 text-slate-600">
-            Model
-            <select
-              value={segmentationModel}
-              disabled={isBuildingImage3d}
-              onChange={(event) => {
-                setSegmentationModel(event.target.value as 'segformer' | 'classical' | 'sam');
-                setDerivedAssets(null);
-                setActiveView('3d');
-              }}
-              className="rounded border border-slate-300 bg-white px-2 py-1.5 text-slate-800 disabled:opacity-50"
-            >
-              <option value="segformer">SegFormer-B4 (Recommended)</option>
-              <option value="classical">Classical CV</option>
-              <option value="sam">Segment Anything (SAM)</option>
-            </select>
-          </label>
-          {image3dError && (
-            <p role="alert" className="basis-full text-red-700">{image3dError}</p>
-          )}
+
+            <label className="flex items-center gap-2 text-slate-600">
+              Model:
+              <select
+                value={segmentationModel}
+                disabled={isBuildingImage3d}
+                onChange={(event) => {
+                  setSegmentationModel(event.target.value as 'segformer' | 'classical' | 'sam');
+                  setDerivedAssets(null);
+                }}
+                className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-slate-800 disabled:opacity-50"
+              >
+                <option value="segformer">SegFormer-B4 (Recommended)</option>
+                <option value="classical">Classical CV</option>
+                <option value="sam">Segment Anything (SAM)</option>
+              </select>
+            </label>
+
+            {image3dError && (
+              <p role="alert" className="basis-full text-red-700 bg-red-50 p-2 rounded border border-red-200">{image3dError}</p>
+            )}
+          </div>
         </div>
       </div>
 
@@ -439,12 +527,18 @@ export default function Standalone3DDigitalTwinPage() {
             {/* 3D WebGL Digital Twin Viewer */}
             <FloodDigitalTwin3D
               initialWaterLevel={currentWaterLevel}
-              sectorName={activeSector.title}
+              sectorName={activeTitle}
               activeCameraPreset={cameraPreset}
               onCameraPresetChange={(p) => setCameraPreset(p)}
               onWaterLevelChange={(lvl) => setCurrentWaterLevel(lvl)}
               onStatsChange={(st) => setClassStats(st)}
-              onSwitchToSwipe={() => setActiveView('swipe')}
+              onSwitchToSwipe={() => {
+                if (activeImageId === 'uploaded' && !derivedAssets) {
+                  void buildImage3d('swipe');
+                } else {
+                  setActiveView('swipe');
+                }
+              }}
               className="w-full"
             />
 
@@ -772,11 +866,17 @@ export default function Standalone3DDigitalTwinPage() {
             <div className="p-4 bg-white border border-cyan-200 rounded-xl flex items-center justify-between text-xs font-mono shadow-2xs">
               <div className="flex items-center space-x-3">
                 <span className="w-2.5 h-2.5 rounded-full bg-cyan-600 animate-pulse" />
-                <span className="font-semibold text-slate-900">Inspect 2D UAV Optical Sensor Telemetry?</span>
+                <span className="font-semibold text-slate-900">Inspect 2D UAV Optical Sensor Telemetry on {activeTitle}?</span>
                 <span className="text-slate-500 hidden sm:inline">&bull; Compare photogrammetric capture against 10-class segmentation mask.</span>
               </div>
               <button
-                onClick={() => setActiveView('swipe')}
+                onClick={() => {
+                  if (activeImageId === 'uploaded' && !derivedAssets) {
+                    void buildImage3d('swipe');
+                  } else {
+                    setActiveView('swipe');
+                  }
+                }}
                 className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded-lg flex items-center space-x-1.5 transition-colors shadow-2xs cursor-pointer"
               >
                 <span>Swipe Segmentation</span>
@@ -785,13 +885,15 @@ export default function Standalone3DDigitalTwinPage() {
             </div>
           </div>
         ) : activeView === 'swipe' ? (
-          /* Swipe Segmentation Comparison View */
+          /* Swipe Segmentation Comparison View (STAYS ON CURRENT ACTIVE IMAGE!) */
           <div className="w-full bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-sm">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 text-xs font-mono">
               <div className="flex items-center space-x-2">
                 <span className="w-2 h-2 rounded-full bg-emerald-600" />
-                <span className="text-slate-900 font-semibold">{activeSector.title}</span>
-                <span className="text-slate-500 hidden sm:inline">({activeSector.basinType})</span>
+                <span className="text-slate-900 font-semibold">{activeTitle}</span>
+                <span className="text-slate-500 hidden sm:inline">
+                  ({activeImageId === 'uploaded' ? 'Custom Uploaded Scene' : activeSector.basinType})
+                </span>
               </div>
               <div className="flex items-center space-x-2">
                 <span className="text-[10px] text-cyan-800 font-semibold px-2 py-0.5 bg-cyan-50 border border-cyan-200 rounded">
@@ -806,54 +908,141 @@ export default function Standalone3DDigitalTwinPage() {
               </div>
             </div>
 
-            <div className="rounded-lg overflow-hidden border border-slate-200">
-              <MaskViewer
-                sampleId={String(selectedSector)}
-                rawImageUrl={activeSector.image}
-                maskImageUrl={activeSector.mask}
-              />
-            </div>
+            {/* If uploaded image needs segmentation first */}
+            {activeImageId === 'uploaded' && !currentMaskImageUrl && isBuildingImage3d ? (
+              <div className="h-96 flex flex-col items-center justify-center border border-dashed border-slate-200 rounded-lg p-6 space-y-3 bg-slate-50/50">
+                <RefreshCw className="w-6 h-6 text-cyan-600 animate-spin" />
+                <span className="font-mono text-xs text-slate-600 font-semibold">
+                  Generating high-accuracy SegFormer segmentation for {activeTitle}…
+                </span>
+              </div>
+            ) : (
+              <div className="rounded-lg overflow-hidden border border-slate-200">
+                <MaskViewer
+                  sampleId={activeImageId}
+                  rawImageUrl={currentRawImageUrl}
+                  maskImageUrl={currentMaskImageUrl || currentRawImageUrl}
+                />
+              </div>
+            )}
 
             <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 pt-1">
               <span>Drag divider horizontally or use circular inspection loupe to reveal raw UAV capture vs. segmentation.</span>
-              <span className="font-semibold text-cyan-800">FloodNet 10-Class Calibrated Overlay</span>
+              <span className="font-semibold text-cyan-800">10-Class Calibrated Model Overlay</span>
             </div>
           </div>
         ) : derivedAssets ? (
-          /* Image 2.5D View */
-          <div className="space-y-4">
-            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs leading-relaxed text-amber-950">
-              <strong>Single-image 2.5D relief view:</strong> Surface relief is derived from the live segmentation overlay
-              and class elevation offsets.
-            </div>
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(240px,1fr)]">
-              <div className="overflow-hidden rounded-xl border border-slate-700 bg-slate-900">
+          /* Photogrammetric 3D Relief View */
+          <div className="space-y-6">
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
+              {/* 3D Photogrammetric Relief Viewer */}
+              <div className="space-y-3">
                 <ImageSegmentationRelief3D
                   imageUrl={derivedAssets.imageUrl}
                   segmentationUrl={derivedAssets.segmentationUrl}
                   classMaskUrl={derivedAssets.classMaskUrl}
+                  depthMapUrl={derivedAssets.depthMapUrl}
                   imageWidth={derivedAssets.imageWidth}
                   imageHeight={derivedAssets.imageHeight}
                   simulatedStage={currentWaterLevel}
                 />
-              </div>
-              <aside className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-                <h2 className="text-sm font-semibold text-slate-900">Live Model Inputs</h2>
-                <img
-                  src={derivedAssets.imageUrl}
-                  alt="Source image used for the 3D surface"
-                  className="max-h-64 w-full rounded border border-slate-200 object-contain"
-                />
-                <dl className="space-y-2 text-xs">
-                  <div>
-                    <dt className="text-slate-500">Segmentation</dt>
-                    <dd className="font-medium text-slate-900">{derivedAssets.modelName}</dd>
+
+                {/* Calibrated Stage Slider for Photogrammetric 3D */}
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4 font-mono text-xs">
+                  <div className="flex items-center space-x-2 shrink-0">
+                    <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Stage Hydro Gauge:</span>
+                    <span className={`text-xs font-bold px-2.5 py-0.5 rounded border tabular-nums ${
+                      currentWaterLevel >= 2.6
+                        ? 'bg-red-50 text-red-700 border-red-300'
+                        : currentWaterLevel >= 1.2
+                        ? 'bg-amber-50 text-amber-800 border-amber-300'
+                        : 'bg-cyan-50 text-cyan-800 border-cyan-200'
+                    }`}>
+                      +{currentWaterLevel.toFixed(1)}m STAGE
+                    </span>
                   </div>
-                  <div>
-                    <dt className="text-slate-500">Relief</dt>
-                    <dd className="font-medium text-slate-900">FloodNet class-based DSM relief</dd>
+
+                  <div className="flex-1 w-full flex items-center space-x-3">
+                    <span className="text-[10px] text-slate-400 font-mono">0.0m</span>
+                    <input
+                      type="range"
+                      min="0.0"
+                      max="4.0"
+                      step="0.1"
+                      value={currentWaterLevel}
+                      onChange={(e) => setCurrentWaterLevel(parseFloat(e.target.value))}
+                      className="flex-1 h-2 bg-slate-200 appearance-none cursor-pointer accent-cyan-600 rounded-lg"
+                    />
+                    <span className="text-[10px] text-slate-400 font-mono">+4.0m</span>
+                  </div>
+
+                  <div className="flex items-center space-x-4 shrink-0 text-[11px]">
+                    <div className="flex items-center space-x-1.5">
+                      <span className="text-slate-400">INUNDATED:</span>
+                      <span className="font-bold text-slate-900 tabular-nums">
+                        {hydroMetrics.inundatedAreaM2.toLocaleString()} m² ({hydroMetrics.inundatedPercent}%)
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Sidebar with Image Telemetry */}
+              <aside className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 font-mono text-xs shadow-xs">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <h2 className="text-sm font-bold text-slate-900 font-sans">Active Photogrammetric Scene</h2>
+                  <span className="text-[10px] text-cyan-800 font-semibold px-2 py-0.5 bg-cyan-50 rounded border border-cyan-200">
+                    RECONSTRUCTED
+                  </span>
+                </div>
+
+                <div className="rounded-lg overflow-hidden border border-slate-200 bg-slate-100">
+                  <img
+                    src={derivedAssets.imageUrl}
+                    alt={activeTitle}
+                    className="max-h-52 w-full object-cover"
+                  />
+                </div>
+
+                <dl className="space-y-2 text-xs divide-y divide-slate-100">
+                  <div className="pt-2 flex justify-between">
+                    <dt className="text-slate-500">Image Source</dt>
+                    <dd className="font-bold text-slate-900 truncate max-w-[150px]">{activeTitle}</dd>
+                  </div>
+                  <div className="pt-2 flex justify-between">
+                    <dt className="text-slate-500">Segmentation Model</dt>
+                    <dd className="font-bold text-cyan-800">{derivedAssets.modelName}</dd>
+                  </div>
+                  <div className="pt-2 flex justify-between">
+                    <dt className="text-slate-500">3D Elevation Relief</dt>
+                    <dd className="font-bold text-slate-900">
+                      {derivedAssets.depthMapUrl ? 'Depth Anything V2 + Semantic DSM' : 'Photogrammetric DSM Extrusions'}
+                    </dd>
+                  </div>
+                  <div className="pt-2 flex justify-between">
+                    <dt className="text-slate-500">Raster Resolution</dt>
+                    <dd className="font-bold text-slate-900 tabular-nums">
+                      {derivedAssets.imageWidth} &times; {derivedAssets.imageHeight} px
+                    </dd>
                   </div>
                 </dl>
+
+                <div className="pt-2 flex items-center justify-between gap-2">
+                  <button
+                    onClick={() => setActiveView('swipe')}
+                    className="flex-1 py-2 px-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-center font-semibold transition-colors flex items-center justify-center space-x-1 cursor-pointer"
+                  >
+                    <Split className="w-3.5 h-3.5" />
+                    <span>Swipe View</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveView('3d')}
+                    className="flex-1 py-2 px-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg text-center font-semibold transition-colors flex items-center justify-center space-x-1 cursor-pointer"
+                  >
+                    <Box className="w-3.5 h-3.5" />
+                    <span>Digital Twin</span>
+                  </button>
+                </div>
               </aside>
             </div>
           </div>

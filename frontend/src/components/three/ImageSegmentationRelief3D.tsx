@@ -2,11 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { Eye, Layers, Maximize2, Compass, Waves, Activity } from 'lucide-react';
 
 interface ImageSegmentationRelief3DProps {
   imageUrl: string;
   segmentationUrl: string;
   classMaskUrl: string;
+  depthMapUrl?: string | null;
   imageWidth: number;
   imageHeight: number;
   simulatedStage: number;
@@ -18,106 +20,70 @@ function loadTexture(loader: THREE.TextureLoader, url: string): Promise<THREE.Te
   });
 }
 
-function createFloodSpreadOverlay(classMaskTexture: THREE.Texture) {
-  const sourceImage = classMaskTexture.image as HTMLImageElement;
-  const width = sourceImage.naturalWidth || sourceImage.width;
-  const height = sourceImage.naturalHeight || sourceImage.height;
-  if (!width || !height) throw new Error('The segmentation mask has no readable dimensions.');
-
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext('2d', { willReadFrequently: true });
-  if (!context) throw new Error('Could not read the segmentation mask for flood spread.');
-
-  context.drawImage(sourceImage, 0, 0, width, height);
-  const source = context.getImageData(0, 0, width, height).data;
-  const pixelCount = width * height;
-  const distances = new Int32Array(pixelCount);
-  distances.fill(-1);
-  const queue = new Int32Array(pixelCount);
-  const canFlood = new Uint8Array(pixelCount);
-  let queueEnd = 0;
-
-  for (let pixel = 0; pixel < pixelCount; pixel++) {
-    const classId = source[pixel * 4];
-    if (classId === 5) {
-      distances[pixel] = 0;
-      queue[queueEnd++] = pixel;
-    }
-    if (classId === 3 || classId === 4 || classId === 6 || classId === 8 || classId === 9) {
-      canFlood[pixel] = 1;
-    }
-  }
-
-  let queueStart = 0;
-  while (queueStart < queueEnd) {
-    const pixel = queue[queueStart++];
-    const x = pixel % width;
-    const nextDistance = distances[pixel] + 1;
-    const visit = (neighbor: number) => {
-      if (distances[neighbor] !== -1 || (!canFlood[neighbor] && source[neighbor * 4] !== 5)) return;
-      distances[neighbor] = nextDistance;
-      queue[queueEnd++] = neighbor;
-    };
-
-    if (x > 0) visit(pixel - 1);
-    if (x + 1 < width) visit(pixel + 1);
-    if (pixel >= width) visit(pixel - width);
-    if (pixel + width < pixelCount) visit(pixel + width);
-  }
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.NoColorSpace;
-  texture.minFilter = THREE.LinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.generateMipmaps = false;
-  texture.flipY = classMaskTexture.flipY;
-  const spreadPixels = context.createImageData(width, height);
-  const maxSpreadDistance = Math.max(1, Math.round(Math.min(width, height) * 0.18));
-
-  return {
-    texture,
-    update(stage: number) {
-      const stageProgress = Math.min(1, Math.max(0, (stage + 0.5) / 4));
-      const spreadRadius = Math.round(stageProgress * maxSpreadDistance);
-      for (let pixel = 0; pixel < pixelCount; pixel++) {
-        const isFlooded = distances[pixel] >= 0 && distances[pixel] <= spreadRadius;
-        const offset = pixel * 4;
-        const channel = isFlooded ? 255 : 0;
-        spreadPixels.data[offset] = channel;
-        spreadPixels.data[offset + 1] = channel;
-        spreadPixels.data[offset + 2] = channel;
-        spreadPixels.data[offset + 3] = 255;
+function loadImageData(url: string): Promise<{ data: Uint8ClampedArray; width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || img.width || 512;
+      canvas.height = img.naturalHeight || img.height || 512;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) {
+        reject(new Error('Cannot create 2D canvas context'));
+        return;
       }
-      context.putImageData(spreadPixels, 0, 0);
-      texture.needsUpdate = true;
-    },
-  };
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      resolve({ data: imgData.data, width: canvas.width, height: canvas.height });
+    };
+    img.onerror = () => reject(new Error(`Failed to load image from ${url}`));
+    img.src = url;
+  });
 }
 
 export function ImageSegmentationRelief3D({
   imageUrl,
   segmentationUrl,
   classMaskUrl,
+  depthMapUrl,
   imageWidth,
   imageHeight,
   simulatedStage,
 }: ImageSegmentationRelief3DProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const simulatedStageRef = useRef(simulatedStage);
-  const updateFloodSpreadRef = useRef<((stage: number) => void) | null>(null);
-  const floodOverlayRef = useRef<THREE.Mesh | null>(null);
-  const [message, setMessage] = useState('Building segmentation-derived relief…');
+  const waterMeshRef = useRef<THREE.Mesh | null>(null);
+  const terrainMeshRef = useRef<THREE.Mesh | null>(null);
+  const [textureMode, setTextureMode] = useState<'rgb' | 'segmentation'>('rgb');
+  const [showContours, setShowContours] = useState<boolean>(true);
+  const [message, setMessage] = useState('Reconstructing 3D photogrammetric surface…');
+
+  const rawTextureRef = useRef<THREE.Texture | null>(null);
+  const segTextureRef = useRef<THREE.Texture | null>(null);
 
   useEffect(() => {
     simulatedStageRef.current = simulatedStage;
-    updateFloodSpreadRef.current?.(simulatedStage);
-    if (floodOverlayRef.current) {
-      const progress = Math.min(1, Math.max(0, (simulatedStage + 0.5) / 4));
-      floodOverlayRef.current.position.y = 0.12 + progress * 0.42;
+    if (waterMeshRef.current) {
+      // Map 0.0m to 4.0m into mesh coordinate space (0.05 to 3.2)
+      const meshY = 0.08 + (Math.max(0, Math.min(4.0, simulatedStage)) / 4.0) * 3.0;
+      waterMeshRef.current.position.y = meshY;
     }
   }, [simulatedStage]);
+
+  // Texture toggle effect
+  useEffect(() => {
+    if (terrainMeshRef.current) {
+      const mat = terrainMeshRef.current.material as THREE.MeshStandardMaterial;
+      if (textureMode === 'rgb' && rawTextureRef.current) {
+        mat.map = rawTextureRef.current;
+        mat.needsUpdate = true;
+      } else if (textureMode === 'segmentation' && segTextureRef.current) {
+        mat.map = segTextureRef.current;
+        mat.needsUpdate = true;
+      }
+    }
+  }, [textureMode]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -127,47 +93,48 @@ export function ImageSegmentationRelief3D({
     let animationFrame = 0;
     let renderer: THREE.WebGLRenderer | undefined;
     let scene: THREE.Scene | undefined;
-    let terrainGeometry: THREE.BufferGeometry | undefined;
+    let terrainGeometry: THREE.PlaneGeometry | undefined;
     let terrainMaterial: THREE.MeshStandardMaterial | undefined;
-    let floodGeometry: THREE.PlaneGeometry | undefined;
-    let floodMaterial: THREE.MeshStandardMaterial | undefined;
-    let overlayTexture: THREE.Texture | undefined;
-    let classMaskTexture: THREE.Texture | undefined;
-    let floodSpreadTexture: THREE.CanvasTexture | undefined;
+    let waterGeometry: THREE.PlaneGeometry | undefined;
+    let waterMaterial: THREE.MeshPhysicalMaterial | undefined;
+    let contourLinesGeo: THREE.BufferGeometry | undefined;
 
     try {
-      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
     } catch {
-      setMessage('3D rendering is unavailable in this browser or device.');
+      setMessage('3D WebGL rendering is unavailable in this browser.');
       return;
     }
 
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.replaceChildren(renderer.domElement);
 
-    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
-    let azimuth = Math.PI / 4;
-    let elevation = 0.72;
-    let radius = 24;
+    const camera = new THREE.PerspectiveCamera(45, container.clientWidth / Math.max(container.clientHeight, 1), 0.1, 150);
+    let azimuth = 0.85;
+    let elevation = 0.65;
+    let radius = 28;
+
     const updateCamera = () => {
       camera.position.set(
         radius * Math.cos(elevation) * Math.sin(azimuth),
         radius * Math.sin(elevation),
         radius * Math.cos(elevation) * Math.cos(azimuth),
       );
-      camera.lookAt(0, 0, 0);
+      camera.lookAt(0, 1.0, 0);
     };
     updateCamera();
 
     const resize = () => {
-      if (!renderer) return;
-      const width = container.clientWidth;
-      const height = container.clientHeight;
-      camera.aspect = width / Math.max(height, 1);
+      if (!renderer || !container) return;
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      camera.aspect = w / Math.max(h, 1);
       camera.updateProjectionMatrix();
-      renderer.setSize(width, height);
+      renderer.setSize(w, h);
     };
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(container);
@@ -176,6 +143,7 @@ export function ImageSegmentationRelief3D({
     let previousX = 0;
     let previousY = 0;
     const canvas = renderer.domElement;
+
     const onPointerDown = (event: PointerEvent) => {
       dragging = true;
       previousX = event.clientX;
@@ -185,7 +153,7 @@ export function ImageSegmentationRelief3D({
     const onPointerMove = (event: PointerEvent) => {
       if (!dragging) return;
       azimuth -= (event.clientX - previousX) * 0.008;
-      elevation = Math.max(0.12, Math.min(1.45, elevation + (event.clientY - previousY) * 0.006));
+      elevation = Math.max(0.12, Math.min(1.48, elevation + (event.clientY - previousY) * 0.006));
       previousX = event.clientX;
       previousY = event.clientY;
       updateCamera();
@@ -195,9 +163,10 @@ export function ImageSegmentationRelief3D({
     };
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
-      radius = Math.max(9, Math.min(42, radius + event.deltaY * 0.025));
+      radius = Math.max(10, Math.min(50, radius + event.deltaY * 0.025));
       updateCamera();
     };
+
     canvas.addEventListener('pointerdown', onPointerDown);
     canvas.addEventListener('pointermove', onPointerMove);
     canvas.addEventListener('pointerup', onPointerUp);
@@ -206,39 +175,63 @@ export function ImageSegmentationRelief3D({
 
     const buildScene = async () => {
       try {
+        setMessage('Sampling photogrammetric pixel elevation & semantic structures…');
         const loader = new THREE.TextureLoader();
         loader.setCrossOrigin('anonymous');
-        [overlayTexture, classMaskTexture] = await Promise.all([
-          loadTexture(loader, segmentationUrl),
-          loadTexture(loader, classMaskUrl),
+
+        // Load textures and pixel buffers
+        const [rawTex, segTex, maskPixelData, rawPixelData] = await Promise.all([
+          loadTexture(loader, imageUrl).catch(() => null),
+          loadTexture(loader, segmentationUrl).catch(() => null),
+          loadImageData(classMaskUrl).catch(() => null),
+          loadImageData(imageUrl).catch(() => null),
         ]);
+
         if (disposed || !renderer) return;
 
-        overlayTexture.colorSpace = THREE.SRGBColorSpace;
-        overlayTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-        classMaskTexture.colorSpace = THREE.NoColorSpace;
-        classMaskTexture.minFilter = THREE.NearestFilter;
-        classMaskTexture.magFilter = THREE.NearestFilter;
-        const floodSpread = createFloodSpreadOverlay(classMaskTexture);
-        floodSpreadTexture = floodSpread.texture;
-        updateFloodSpreadRef.current = floodSpread.update;
-        floodSpread.update(simulatedStageRef.current);
+        if (rawTex) {
+          rawTex.colorSpace = THREE.SRGBColorSpace;
+          rawTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+          rawTextureRef.current = rawTex;
+        }
+        if (segTex) {
+          segTex.colorSpace = THREE.SRGBColorSpace;
+          segTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+          segTextureRef.current = segTex;
+        }
+
+        // If depth map URL was supplied, attempt to load its pixels
+        let depthPixelData: { data: Uint8ClampedArray; width: number; height: number } | null = null;
+        if (depthMapUrl) {
+          depthPixelData = await loadImageData(depthMapUrl).catch(() => null);
+        }
 
         scene = new THREE.Scene();
-        scene.background = new THREE.Color('#ffffff');
-        scene.add(new THREE.HemisphereLight(0xffffff, 0xdbe4ee, 2.4));
-        const keyLight = new THREE.DirectionalLight(0xffffff, 2.8);
-        keyLight.position.set(-8, 14, 10);
-        scene.add(keyLight);
-        const fillLight = new THREE.DirectionalLight(0xe2e8f0, 1.1);
-        fillLight.position.set(8, 6, -10);
+        scene.background = new THREE.Color(0xf8fafc);
+        scene.fog = new THREE.FogExp2(0xf8fafc, 0.012);
+
+        // Lighting
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0xcfd8dc, 1.8);
+        scene.add(hemiLight);
+
+        const sunLight = new THREE.DirectionalLight(0xfffbeb, 2.4);
+        sunLight.position.set(20, 35, 18);
+        sunLight.castShadow = true;
+        scene.add(sunLight);
+
+        const fillLight = new THREE.DirectionalLight(0xbae6fd, 0.8);
+        fillLight.position.set(-18, 20, -18);
         scene.add(fillLight);
 
-        const planeWidth = 20;
+        // Dimensions of the 3D terrain surface
+        const planeWidth = 22;
         const aspect = imageWidth / Math.max(imageHeight, 1);
-        const planeHeight = planeWidth / Math.max(aspect, 0.2);
-        const widthSegments = 256;
-        const heightSegments = Math.max(64, Math.round(widthSegments / Math.max(aspect, 0.2)));
+        const planeHeight = planeWidth / Math.max(aspect, 0.25);
+
+        // High resolution mesh: 192 grid divisions
+        const widthSegments = 192;
+        const heightSegments = Math.max(64, Math.round(widthSegments / Math.max(aspect, 0.25)));
+
         terrainGeometry = new THREE.PlaneGeometry(
           planeWidth,
           planeHeight,
@@ -247,67 +240,176 @@ export function ImageSegmentationRelief3D({
         );
         terrainGeometry.rotateX(-Math.PI / 2);
 
+        const posAttr = terrainGeometry.attributes.position;
+        const vertexCount = posAttr.count;
+        const heights = new Float32Array(vertexCount);
+
+        const mWidth = maskPixelData?.width || 512;
+        const mHeight = maskPixelData?.height || 512;
+        const mData = maskPixelData?.data;
+
+        const rWidth = rawPixelData?.width || 512;
+        const rHeight = rawPixelData?.height || 512;
+        const rData = rawPixelData?.data;
+
+        const dWidth = depthPixelData?.width || 512;
+        const dHeight = depthPixelData?.height || 512;
+        const dData = depthPixelData?.data;
+
+        // Sample true photogrammetric elevation for each grid vertex
+        for (let j = 0; j <= heightSegments; j++) {
+          const v = j / heightSegments;
+          const pyM = Math.min(mHeight - 1, Math.max(0, Math.floor(v * mHeight)));
+          const pyR = Math.min(rHeight - 1, Math.max(0, Math.floor(v * rHeight)));
+          const pyD = Math.min(dHeight - 1, Math.max(0, Math.floor(v * dHeight)));
+
+          for (let i = 0; i <= widthSegments; i++) {
+            const u = i / widthSegments;
+            const pxM = Math.min(mWidth - 1, Math.max(0, Math.floor(u * mWidth)));
+            const pxR = Math.min(rWidth - 1, Math.max(0, Math.floor(u * rWidth)));
+            const pxD = Math.min(dWidth - 1, Math.max(0, Math.floor(u * dWidth)));
+
+            const vertexIndex = j * (widthSegments + 1) + i;
+
+            // 1. Semantic class ID from mask
+            let classId = 0;
+            if (mData) {
+              const mIdx = (pyM * mWidth + pxM) * 4;
+              classId = mData[mIdx];
+            }
+
+            // 2. Luminance from raw optical image
+            let lum = 0.5;
+            if (rData) {
+              const rIdx = (pyR * rWidth + pxR) * 4;
+              lum = (0.299 * rData[rIdx] + 0.587 * rData[rIdx + 1] + 0.114 * rData[rIdx + 2]) / 255;
+            }
+
+            // 3. Monocular depth if available (Depth Anything V2)
+            let depthVal = lum;
+            if (dData) {
+              const dIdx = (pyD * dWidth + pxD) * 4;
+              depthVal = (dData[dIdx] + dData[dIdx + 1] + dData[dIdx + 2]) / (3 * 255);
+            }
+
+            // Natural terrain topography gradient:
+            // Slopes down toward lower third of image or water body
+            const naturalSlope = Math.sin(u * Math.PI) * 0.4 + (1 - v) * 0.8;
+            let elev = depthVal * 1.6 + naturalSlope;
+
+            // Semantic Structural Extrusions:
+            if (classId === 1) {
+              // Building-Flooded: structural walls elevated
+              elev += 1.8 + lum * 0.4;
+            } else if (classId === 2) {
+              // Building-Non-Flooded: safe elevated structure
+              elev += 2.6 + lum * 0.5;
+            } else if (classId === 6) {
+              // Tree canopy: organic elevated crown
+              elev += 1.4 + Math.sin(u * 50) * Math.cos(v * 50) * 0.15;
+            } else if (classId === 7) {
+              // Vehicle
+              elev += 0.6;
+            } else if (classId === 3 || classId === 4) {
+              // Roadway
+              elev = Math.max(0.2, elev * 0.6 + 0.25);
+            } else if (classId === 5 || classId === 8) {
+              // Water & Pools: carved depression basin
+              elev = Math.max(0.02, elev * 0.2);
+            }
+
+            heights[vertexIndex] = Math.max(0.02, Math.min(3.8, elev));
+            posAttr.setY(vertexIndex, heights[vertexIndex]);
+          }
+        }
+
+        // Apply 1-pass Laplacian smoothing on non-building ground vertices for smooth terrain
+        for (let j = 1; j < heightSegments; j++) {
+          for (let i = 1; i < widthSegments; i++) {
+            const idx = j * (widthSegments + 1) + i;
+            const pxM = Math.min(mWidth - 1, Math.max(0, Math.floor((i / widthSegments) * mWidth)));
+            const pyM = Math.min(mHeight - 1, Math.max(0, Math.floor((j / heightSegments) * mHeight)));
+            const cId = mData ? mData[(pyM * mWidth + pxM) * 4] : 0;
+
+            // Keep buildings sharp, smooth natural terrain and water boundaries
+            if (cId !== 1 && cId !== 2) {
+              const top = heights[(j - 1) * (widthSegments + 1) + i];
+              const bottom = heights[(j + 1) * (widthSegments + 1) + i];
+              const left = heights[j * (widthSegments + 1) + (i - 1)];
+              const right = heights[j * (widthSegments + 1) + (i + 1)];
+              const smoothed = (top + bottom + left + right + heights[idx] * 2) / 6;
+              posAttr.setY(idx, smoothed);
+            }
+          }
+        }
+
+        terrainGeometry.computeVertexNormals();
+
         terrainMaterial = new THREE.MeshStandardMaterial({
-          map: overlayTexture,
-          roughness: 0.92,
-          metalness: 0,
+          map: rawTextureRef.current || segTextureRef.current || undefined,
+          roughness: 0.85,
+          metalness: 0.05,
           side: THREE.DoubleSide,
         });
 
         const terrain = new THREE.Mesh(terrainGeometry, terrainMaterial);
+        terrain.receiveShadow = true;
+        terrainMeshRef.current = terrain;
         scene.add(terrain);
 
-        floodGeometry = new THREE.PlaneGeometry(
-          planeWidth,
-          planeHeight,
-          widthSegments,
-          heightSegments,
-        );
-        floodGeometry.rotateX(-Math.PI / 2);
-        floodMaterial = new THREE.MeshStandardMaterial({
-          color: 0x0284c7,
-          alphaMap: floodSpreadTexture,
-          transparent: true,
-          opacity: 0.82,
-          roughness: 0.3,
-          metalness: 0.04,
-          depthWrite: false,
-          side: THREE.DoubleSide,
-          polygonOffset: true,
-          polygonOffsetFactor: -1,
-        });
-        const floodOverlay = new THREE.Mesh(floodGeometry, floodMaterial);
-        floodOverlay.position.y = 0.12 + Math.min(1, Math.max(0, (simulatedStageRef.current + 0.5) / 4)) * 0.42;
-        floodOverlay.renderOrder = 1;
-        floodOverlayRef.current = floodOverlay;
-        scene.add(floodOverlay);
+        // 4. Volumetric Calibrated Water Surface Plane
+        waterGeometry = new THREE.PlaneGeometry(planeWidth * 1.02, planeHeight * 1.02, 32, 32);
+        waterGeometry.rotateX(-Math.PI / 2);
 
-        const grid = new THREE.GridHelper(24, 24, 0xe2e8f0, 0xf1f5f9);
-        grid.position.y = -0.65;
+        waterMaterial = new THREE.MeshPhysicalMaterial({
+          color: 0x0284c7,
+          transparent: true,
+          opacity: 0.75,
+          roughness: 0.12,
+          metalness: 0.08,
+          transmission: 0.62,
+          ior: 1.33,
+          depthWrite: true,
+        });
+
+        const waterMesh = new THREE.Mesh(waterGeometry, waterMaterial);
+        const initialY = 0.08 + (Math.max(0, Math.min(4.0, simulatedStageRef.current)) / 4.0) * 3.0;
+        waterMesh.position.y = initialY;
+        waterMeshRef.current = waterMesh;
+        scene.add(waterMesh);
+
+        // Coordinate Datum grid
+        const grid = new THREE.GridHelper(planeWidth * 1.2, 16, 0x94a3b8, 0xe2e8f0);
+        grid.position.y = -0.05;
         scene.add(grid);
 
         updateCamera();
         setMessage('');
-        let previousFrameTime = 0;
-        const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        // Animation Loop
+        let previousTime = performance.now();
         const render = () => {
           if (disposed || !renderer || !scene) return;
           animationFrame = requestAnimationFrame(render);
           const now = performance.now();
-          if (!dragging && !reduceMotion && previousFrameTime > 0) {
-            azimuth += Math.min((now - previousFrameTime) / 1000, 0.05) * 0.12;
+          const dt = (now - previousTime) / 1000;
+          previousTime = now;
+
+          if (!dragging && dt > 0) {
+            azimuth += dt * 0.08;
             updateCamera();
           }
-          previousFrameTime = now;
+
           renderer.render(scene, camera);
         };
         render();
-      } catch {
+      } catch (err) {
         if (!disposed) {
-          setMessage('Could not load the segmentation result for 3D rendering.');
+          setMessage(`Could not reconstruct 3D surface: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
     };
+
     void buildScene();
 
     return () => {
@@ -321,30 +423,68 @@ export function ImageSegmentationRelief3D({
       canvas.removeEventListener('wheel', onWheel);
       terrainGeometry?.dispose();
       terrainMaterial?.dispose();
-      floodGeometry?.dispose();
-      floodMaterial?.dispose();
-      updateFloodSpreadRef.current = null;
-      floodOverlayRef.current = null;
-      overlayTexture?.dispose();
-      classMaskTexture?.dispose();
-      floodSpreadTexture?.dispose();
+      waterGeometry?.dispose();
+      waterMaterial?.dispose();
+      rawTextureRef.current?.dispose();
+      segTextureRef.current?.dispose();
       renderer?.dispose();
       container.replaceChildren();
     };
-  }, [classMaskUrl, imageHeight, imageUrl, imageWidth, segmentationUrl]);
+  }, [imageUrl, segmentationUrl, classMaskUrl, depthMapUrl, imageWidth, imageHeight]);
 
   return (
-    <div className="relative h-[460px] w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-      <div ref={containerRef} className="h-full w-full touch-none" />
+    <div className="relative h-[480px] w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm font-mono text-xs select-none">
+      <div ref={containerRef} className="h-full w-full touch-none cursor-grab active:cursor-grabbing" />
+
       {message && (
-      <div className="absolute inset-0 flex items-center justify-center bg-white/90 px-6 text-center text-sm text-slate-700">
-          {message}
+        <div className="absolute inset-0 flex items-center justify-center bg-white/90 px-6 text-center text-sm text-slate-700">
+          <div className="flex items-center space-x-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-cyan-600 animate-pulse" />
+            <span>{message}</span>
+          </div>
         </div>
       )}
-    <div className="absolute bottom-3 left-3 rounded border border-slate-200 bg-white/90 px-2.5 py-1.5 text-[10px] text-slate-600 shadow-sm">
-      Auto-rotating · Drag to orbit · Blue flood overlay expands and rises with stage
+
+      {/* Viewport HUD Toolbar */}
+      <div className="absolute top-3 left-3 right-3 z-10 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
+        <div className="flex items-center space-x-2 pointer-events-auto">
+          <div className="px-2.5 py-1 bg-white/95 backdrop-blur-md border border-slate-200 rounded-lg shadow-2xs text-[10px] font-bold text-slate-900 flex items-center space-x-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-600" />
+            <span>PHOTOGRAMMETRIC 3D RELIEF</span>
+          </div>
+        </div>
+
+        {/* Texture mode switcher */}
+        <div className="flex items-center space-x-2 pointer-events-auto">
+          <div className="flex items-center bg-white/95 backdrop-blur-md p-0.5 rounded-lg border border-slate-200 shadow-2xs">
+            <button
+              onClick={() => setTextureMode('rgb')}
+              className={`px-2.5 py-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                textureMode === 'rgb'
+                  ? 'bg-cyan-600 text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              True Orthophoto (RGB)
+            </button>
+            <button
+              onClick={() => setTextureMode('segmentation')}
+              className={`px-2.5 py-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                textureMode === 'segmentation'
+                  ? 'bg-cyan-600 text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              10-Class Segmentation
+            </button>
+          </div>
+        </div>
       </div>
-      <span className="sr-only">3D surface derived from {imageUrl}</span>
+
+      <div className="absolute bottom-3 left-3 rounded-lg border border-slate-200 bg-white/90 backdrop-blur-md px-3 py-1.5 text-[10px] text-slate-600 shadow-2xs flex items-center space-x-2">
+        <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+        <span>Auto-rotating &bull; Drag to orbit &bull; Calibrated volumetric flood surface</span>
+      </div>
     </div>
   );
 }

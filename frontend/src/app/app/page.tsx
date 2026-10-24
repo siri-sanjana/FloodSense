@@ -5,6 +5,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   UploadCloud,
+  Camera,
+  FolderOpen,
+  Image as ImageIcon,
   ArrowRight,
   ShieldAlert,
   X,
@@ -21,7 +24,9 @@ import { FloodSenseLogo } from '../../components/ui/FloodSenseLogo';
 
 export default function AppWelcomePage() {
   const router = useRouter();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadPhotoRef = useRef<HTMLInputElement>(null);
+  const cameraCaptureRef = useRef<HTMLInputElement>(null);
+  const browseFilesRef = useRef<HTMLInputElement>(null);
 
   const [question, setQuestion] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -37,49 +42,6 @@ export default function AppWelcomePage() {
     'Can you summarize the visible flood damage?',
     'Explain the assessment results in simple terms.',
   ];
-
-  const SAMPLE_INCIDENTS = [
-    {
-      id: '10169',
-      title: 'Pass 10169: Kochi Residential Inundation',
-      location: 'Periyar River Basin, Kerala',
-      image: '/samples/10169.jpg',
-      severity: 'CRITICAL',
-      buildings: 16,
-    },
-    {
-      id: '10815',
-      title: 'Pass 10815: Cuttack Canal Breach',
-      location: 'Mahanadi Basin Embankment, Odisha',
-      image: '/samples/10815.jpg',
-      severity: 'HIGH',
-      buildings: 21,
-    },
-    {
-      id: '6423',
-      title: 'Pass 6423: Brahmaputra Riverine Causeway',
-      location: 'Assam Lowland Bridge Axis',
-      image: '/samples/6423.jpg',
-      severity: 'MODERATE',
-      buildings: 9,
-    },
-  ];
-
-  const handleOpenSample = async (sample: (typeof SAMPLE_INCIDENTS)[number]) => {
-    setIsSubmitting(true);
-    setErrorMsg(null);
-    try {
-      const thread = await api.createChat({
-        title: sample.title,
-        location_tag: sample.location,
-        severity: sample.severity === 'CRITICAL' ? 'CRITICAL' : 'MODERATE',
-      });
-      router.push(`/app/chat/${thread.id}?sample_id=${sample.id}`);
-    } catch (error) {
-      setErrorMsg(error instanceof Error ? error.message : 'Could not create a sample assessment.');
-      setIsSubmitting(false);
-    }
-  };
 
   const handleFile = (file: File) => {
     setErrorMsg(null);
@@ -166,7 +128,7 @@ export default function AppWelcomePage() {
             Start Flood Assessment
           </h1>
           <p className="font-sans text-sm text-slate-600 max-w-xl mx-auto leading-relaxed">
-            Upload aerial drone imagery to run verified segmentation, detect affected structures,
+          Upload aerial imagery to run segmentation, inspect scene classes,
             and inspect flood boundaries in conversational natural language.
           </p>
         </div>
@@ -223,24 +185,65 @@ export default function AppWelcomePage() {
                     Supports JPEG, PNG, WebP (up to 20MB)
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="px-4 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-lg text-xs transition-colors font-sans shadow-2xs"
-                >
-                  Browse Files
-                </button>
                 <input
-                  ref={fileInputRef}
+                  ref={uploadPhotoRef}
                   type="file"
-                  accept="image/jpeg,image/png,image/webp"
+                  accept="image/*"
                   className="hidden"
                   onChange={(e) => {
                     if (e.target.files && e.target.files[0]) {
                       handleFile(e.target.files[0]);
                     }
+                    e.currentTarget.value = '';
                   }}
                 />
+                <input
+                  ref={cameraCaptureRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) handleFile(e.target.files[0]);
+                    e.currentTarget.value = '';
+                  }}
+                />
+                <input
+                  ref={browseFilesRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) handleFile(e.target.files[0]);
+                    e.currentTarget.value = '';
+                  }}
+                />
+                <div className="flex flex-wrap justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => uploadPhotoRef.current?.click()}
+                    className="inline-flex items-center gap-2 rounded-lg border border-cyan-600 bg-cyan-600 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-cyan-700"
+                  >
+                    <ImageIcon className="h-4 w-4" />
+                    Upload photo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => cameraCaptureRef.current?.click()}
+                    className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100"
+                  >
+                    <Camera className="h-4 w-4" />
+                    Take photo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => browseFilesRef.current?.click()}
+                    className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100"
+                  >
+                    <FolderOpen className="h-4 w-4" />
+                    Browse files
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -314,52 +317,6 @@ export default function AppWelcomePage() {
           </div>
         </form>
 
-        {/* Preloaded Incidents */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between text-xs text-slate-600">
-            <span className="uppercase tracking-wider text-[10px] font-semibold">Or Inspect Preloaded Passes:</span>
-            <span className="text-[10px] text-cyan-700 font-medium">BENCHMARK DATASETS</span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {SAMPLE_INCIDENTS.map((inc) => (
-              <button
-                key={inc.id}
-                type="button"
-                onClick={() => void handleOpenSample(inc)}
-                disabled={isSubmitting}
-                className="group w-full text-left p-3 bg-white border border-slate-200 hover:border-cyan-500 rounded-xl space-y-2 transition-all block shadow-xs disabled:opacity-60"
-              >
-                <div className="aspect-video w-full rounded-lg overflow-hidden relative bg-slate-100 border border-slate-100">
-                  <img
-                    src={inc.image}
-                    alt={inc.title}
-                    className="w-full h-full object-cover group-hover:scale-102 transition-transform duration-200"
-                  />
-                  <span
-                    className={`absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded text-[9px] font-bold ${
-                      inc.severity === 'CRITICAL'
-                        ? 'bg-red-600 text-white'
-                        : inc.severity === 'HIGH'
-                        ? 'bg-amber-600 text-white'
-                        : 'bg-cyan-600 text-white'
-                    }`}
-                  >
-                    {inc.severity}
-                  </span>
-                </div>
-                <div>
-                  <div className="font-sans text-xs font-semibold text-slate-900 group-hover:text-cyan-700 truncate transition-colors">
-                    {inc.title}
-                  </div>
-                  <div className="text-[10px] text-slate-500 truncate mt-0.5">
-                    {inc.location} &bull; {inc.buildings} buildings
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
       </div>
     </div>
   );

@@ -8,8 +8,6 @@ import {
   Search,
   Image as ImageIcon,
   Settings,
-  Sun,
-  Moon,
   PanelLeftClose,
   PanelLeftOpen,
   AlertTriangle,
@@ -24,9 +22,12 @@ import { CommandPalette } from '../../components/CommandPalette';
 import { CitationDrawer } from '../../components/CitationDrawer';
 import { FloodSenseLogo } from '../../components/ui/FloodSenseLogo';
 import { CURRENT_USER } from '../../lib/mock-data';
-import { CitationClause } from '../../lib/types';
+import { CitationClause, UserRole } from '../../lib/types';
 import { api } from '../../lib/api';
 import type { ChatThread } from '../../lib/api';
+
+const isUserRole = (role: string): role is UserRole =>
+  role === 'responder' || role === 'researcher' || role === 'citizen' || role === 'journalist';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -36,26 +37,19 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [activeCitation, setActiveCitation] = useState<CitationClause | null>(null);
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [searchQuery, setSearchQuery] = useState('');
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [threadToDelete, setThreadToDelete] = useState<{ id: string; title: string } | null>(null);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
-  const [user, setUser] = useState(CURRENT_USER);
+  const [user, setUser] = useState({ ...CURRENT_USER, avatar_url: undefined as string | undefined });
   const [dataError, setDataError] = useState<string | null>(null);
+  const [isGuest, setIsGuest] = useState(false);
 
   useEffect(() => {
-    // Default to clean white/light theme
-    const savedTheme = localStorage.getItem('floodsense_theme') as 'light' | 'dark' | null;
-    const initialTheme = savedTheme || 'light';
-    setTheme(initialTheme);
-    if (initialTheme === 'dark') {
-      document.documentElement.classList.remove('light');
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      document.documentElement.classList.add('light');
-    }
+    setIsGuest(api.isGuestMode());
+    localStorage.removeItem('floodsense_theme');
+    document.documentElement.classList.remove('dark');
+    document.documentElement.classList.add('light');
 
     const loadWorkspace = async () => {
       try {
@@ -68,7 +62,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           ...prev,
           name: u.name,
           email: u.email,
-          role: (u.role as any) || prev.role,
+          role: isUserRole(u.role) ? u.role : prev.role,
+          avatar_url: u.avatar_url,
         }));
         setThreads(await api.getChats());
         setDataError(null);
@@ -80,19 +75,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
     setMobileDrawerOpen(false);
   }, [pathname, router]);
-
-  const toggleTheme = () => {
-    const nextTheme = theme === 'light' ? 'dark' : 'light';
-    setTheme(nextTheme);
-    localStorage.setItem('floodsense_theme', nextTheme);
-    if (nextTheme === 'dark') {
-      document.documentElement.classList.remove('light');
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      document.documentElement.classList.add('light');
-    }
-  };
 
   const handleNewChat = async () => {
     try {
@@ -158,7 +140,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Top Header: Brand & New Chat */}
       <div className="p-3.5 border-b border-slate-200 space-y-3 bg-white">
         <div className="flex items-center justify-between">
-          <FloodSenseLogo size="sm" href="/app" />
+          <FloodSenseLogo size="sm" href="/" />
         </div>
 
         {/* New Chat Button */}
@@ -170,7 +152,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <Plus className="w-4 h-4 stroke-[2.5]" />
             <span className="text-xs">New Chat</span>
           </div>
-          <span className="text-[10px] opacity-75 font-mono">Ctrl+N</span>
         </button>
 
         {/* Search Chats Input */}
@@ -256,17 +237,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     <div className="truncate text-xs font-sans font-medium text-slate-900">
                       {thread.title}
                     </div>
-                    <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1 font-mono">
+                    <div className="truncate text-[10px] text-slate-500 mt-1 font-mono">
                       <span className="truncate">{(thread.location_tag || 'Sector').split('(')[0]}</span>
-                      <span
-                        className={`px-1 text-[9px] rounded font-medium ${
-                          thread.severity === 'CRITICAL'
-                            ? 'text-red-700 bg-red-50'
-                            : 'text-cyan-800 bg-cyan-50'
-                        }`}
-                      >
-                        {thread.severity}
-                      </span>
                     </div>
                   </Link>
 
@@ -307,9 +279,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     <div className="truncate text-xs font-sans font-medium text-slate-900">
                       {thread.title}
                     </div>
-                    <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1 font-mono">
+                    <div className="truncate text-[10px] text-slate-500 mt-1 font-mono">
                       <span className="truncate">{(thread.location_tag || 'Sector').split('(')[0]}</span>
-                      <span className="text-[9px] text-cyan-800 font-medium">{thread.severity}</span>
                     </div>
                   </Link>
 
@@ -350,9 +321,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     <div className="truncate text-xs font-sans font-medium text-slate-900">
                       {thread.title}
                     </div>
-                    <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1 font-mono">
+                    <div className="truncate text-[10px] text-slate-500 mt-1 font-mono">
                       <span className="truncate">{(thread.location_tag || 'Sector').split('(')[0]}</span>
-                      <span className="text-[9px] text-slate-500 font-medium">{thread.severity}</span>
                     </div>
                   </Link>
 
@@ -393,9 +363,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     <div className="truncate text-xs font-sans font-medium text-slate-900">
                       {thread.title}
                     </div>
-                    <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1 font-mono">
+                    <div className="truncate text-[10px] text-slate-500 mt-1 font-mono">
                       <span className="truncate">{(thread.location_tag || 'Sector').split('(')[0]}</span>
-                      <span className="text-[9px] text-slate-500 font-medium">{thread.severity}</span>
                     </div>
                   </Link>
 
@@ -435,24 +404,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <span>Settings &amp; Preferences</span>
             </Link>
 
-            <button
-              onClick={() => {
-                toggleTheme();
-                setProfileMenuOpen(false);
-              }}
-              className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs text-slate-700 hover:bg-slate-100 transition-colors"
-            >
-              <div className="flex items-center space-x-2">
-                {theme === 'dark' ? (
-                  <Moon className="w-3.5 h-3.5 text-cyan-600" />
-                ) : (
-                  <Sun className="w-3.5 h-3.5 text-amber-500" />
-                )}
-                <span>Theme: {theme === 'dark' ? 'Dark Mode' : 'Light Mode'}</span>
-              </div>
-              <span className="text-[10px] text-slate-400">Toggle</span>
-            </button>
-
             <div className="pt-1 border-t border-slate-100">
               <button
                 onClick={handleSignOut}
@@ -471,9 +422,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             onClick={() => setProfileMenuOpen(!profileMenuOpen)}
             className="flex items-center space-x-2.5 text-left flex-1 min-w-0 p-1 rounded-lg hover:bg-slate-100 transition-colors"
           >
-            <div className="w-7 h-7 rounded-full bg-cyan-600 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-xs">
-              {user.name.charAt(0)}
-            </div>
+            <span className="w-8 h-8 rounded-full bg-cyan-600 text-white overflow-hidden flex items-center justify-center font-bold text-xs shrink-0 shadow-xs">
+              {user.avatar_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
+              ) : user.name.charAt(0)}
+            </span>
             <div className="flex-1 min-w-0">
               <div className="text-xs font-semibold text-slate-900 truncate">
                 {user.name.split(',')[0]}
@@ -521,10 +475,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </button>
 
           <div className="flex items-center space-x-2">
-            <FloodSenseLogo size="sm" href="/app" />
-            <span className="text-[10px] text-cyan-800 px-1.5 py-0.2 bg-cyan-50 border border-cyan-200 rounded font-medium">
-              STUDIO
-            </span>
+            <FloodSenseLogo size="sm" href="/" />
           </div>
         </div>
 
@@ -535,32 +486,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           >
             <Search className="w-3.5 h-3.5 text-cyan-600" />
             <span className="text-[11px] hidden sm:inline-block">Command Palette...</span>
-            <kbd className="text-[10px] bg-white px-1.5 py-0.2 border border-slate-200 rounded text-slate-500 shadow-2xs">
-              Ctrl+K
-            </kbd>
           </button>
 
-          <button
-            onClick={toggleTheme}
-            className="p-1.5 text-slate-600 hover:text-slate-900 border border-slate-200 rounded-lg transition-colors"
-            title="Toggle Light / Dark Mode"
-          >
-            {theme === 'dark' ? (
-              <Sun className="w-4 h-4 text-amber-500" />
-            ) : (
-              <Moon className="w-4 h-4 text-cyan-700" />
-            )}
-          </button>
-
-          <Link
-            href="/app/settings"
-            className="flex items-center space-x-2 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-800 hover:bg-slate-100 transition-colors"
-          >
-            <span className="w-2 h-2 rounded-full bg-emerald-600" />
-            <span className="truncate max-w-[120px]">{user.name.split(',')[0]}</span>
-          </Link>
         </div>
       </header>
+      {isGuest && (
+        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-[11px] font-mono text-amber-900">
+          Guest demo session — conversations are temporary and account settings are unavailable.
+        </div>
+      )}
 
       {/* ─────────────────────────── MAIN WRAPPER ─────────────────────────── */}
       <div className="flex-1 flex overflow-hidden relative">

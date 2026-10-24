@@ -1,495 +1,267 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  User,
-  Shield,
-  Sliders,
-  Trash2,
-  CheckCircle2,
-  Moon,
-  Sun,
-  Monitor,
-  KeyRound,
-  LogOut,
-  AlertTriangle,
-  Lock,
-  Eye,
-  EyeOff
-} from 'lucide-react';
+import { Camera, LogOut, Save, UserRound } from 'lucide-react';
+import { api } from '../../../lib/api';
 import { CURRENT_USER } from '../../../lib/mock-data';
-import { api, BACKEND_URL } from '../../../lib/api';
-import { BackendApiPlayground } from '../../../components/BackendApiPlayground';
+import type { User } from '../../../lib/api';
+import type { UserRole } from '../../../lib/types';
+
+type MeasurementUnit = 'metric' | 'imperial';
+type ReportTone = 'concise_tactical' | 'comprehensive_analytical' | 'public_bulletin';
+
+const isUserRole = (role: string): role is UserRole =>
+  role === 'responder' || role === 'researcher' || role === 'citizen' || role === 'journalist';
 
 export default function SettingsPage() {
   const router = useRouter();
-
-  const [profile, setProfile] = useState(CURRENT_USER);
-  const [themePref, setThemePref] = useState<'light' | 'dark' | 'system'>('light');
-  const [saved, setSaved] = useState(false);
-  const [saveMessage, setSaveMessage] = useState('Settings Saved');
-
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [passwordNotice, setPasswordNotice] = useState<string | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [profile, setProfile] = useState<User>({
+    ...CURRENT_USER,
+    email: '',
+    created_at: '',
+  });
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
 
   useEffect(() => {
-    const storedTheme = localStorage.getItem('floodsense_theme') as 'light' | 'dark' | null;
-    if (storedTheme) {
-      setThemePref(storedTheme);
-    }
-
+    let active = true;
     api.getCurrentUser().then((user) => {
-      if (user) {
-        setProfile((prev) => ({
-          ...prev,
-          name: user.name,
-          email: user.email,
-          role: (user.role as any) || prev.role,
-          region: user.region || prev.region,
-          prefs: {
-            ...prev.prefs,
-            unit: user.prefs?.unit || prev.prefs.unit,
-            tone: user.prefs?.tone || prev.prefs.tone,
-            daylight_mode: user.prefs?.daylight_mode ?? prev.prefs.daylight_mode,
-          },
-        }));
+      if (active && user) setProfile(user);
+    }).catch((loadError: unknown) => {
+      if (active) {
+        setError(loadError instanceof Error ? loadError.message : 'Could not load your profile.');
       }
-    }).catch((error: unknown) => {
-      setPasswordNotice(error instanceof Error ? error.message : 'Could not load your Supabase profile.');
     });
+    return () => {
+      active = false;
+    };
   }, []);
 
-  const handleThemeChange = (newTheme: 'light' | 'dark' | 'system') => {
-    setThemePref(newTheme);
-    let effective = newTheme;
-    if (newTheme === 'system') {
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      effective = prefersDark ? 'dark' : 'light';
-    }
-
-    localStorage.setItem('floodsense_theme', newTheme);
-    if (effective === 'dark') {
-      document.documentElement.classList.remove('light');
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      document.documentElement.classList.add('light');
-    }
-
-    void api.updatePreferences({ theme: newTheme }).catch((error: unknown) => {
-      setPasswordNotice(error instanceof Error ? error.message : 'Could not save theme preference.');
-    });
-  };
-
-  const handleSaveProfile = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSave = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsSaving(true);
+    setError(null);
+    setNotice(null);
     try {
       await api.updatePreferences({
         displayName: profile.name,
         role: profile.role,
         region: profile.region,
-        unit: profile.prefs.unit,
-        tone: profile.prefs.tone,
+        unit: profile.prefs?.unit || 'metric',
+        tone: profile.prefs?.tone || 'concise_tactical',
       });
-
-      setSaveMessage('Profile configurations saved successfully');
-      setSaved(true);
-      setPasswordNotice(null);
-      setTimeout(() => setSaved(false), 2500);
-    } catch (error) {
-      setPasswordNotice(error instanceof Error ? error.message : 'Could not save profile settings.');
+      setNotice('Profile and preferences saved.');
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Could not save your profile.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
-  const handlePasswordUpdate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setPasswordNotice(null);
-    if (!currentPassword) {
-      setPasswordNotice('Please enter your current password.');
-      return;
-    }
-    if (newPassword.length < 8) {
-      setPasswordNotice('New password must contain at least 8 characters.');
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setPasswordNotice('New passwords do not match.');
-      return;
-    }
+  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
 
+    setError(null);
+    setNotice(null);
+    setIsUploadingAvatar(true);
     try {
-      await api.updatePassword(newPassword, currentPassword);
-      setPasswordNotice('Password updated successfully.');
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
-      setTimeout(() => setPasswordNotice(null), 3000);
-    } catch (error) {
-      setPasswordNotice(error instanceof Error ? error.message : 'Could not update password.');
-    }
-  };
-
-  const handlePurgeHistory = async () => {
-    if (
-      confirm(
-        'Are you sure you wish to permanently delete all saved flood inspection history, chat turns, reports, and uploaded imagery? This action cannot be reversed.'
-      )
-    ) {
-      try {
-        await api.deleteAllChats();
-        router.push('/app');
-      } catch (error) {
-        setPasswordNotice(error instanceof Error ? error.message : 'Could not delete your saved conversations.');
-      }
+      const updatedProfile = await api.uploadProfileAvatar(file);
+      setProfile(updatedProfile);
+      setNotice('Profile photo updated.');
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : 'Could not upload your profile photo.');
+    } finally {
+      setIsUploadingAvatar(false);
     }
   };
 
   const handleSignOut = async () => {
+    setIsSigningOut(true);
+    setError(null);
     try {
       await api.logout();
-      router.push('/signin');
-    } catch (error) {
-      setPasswordNotice(error instanceof Error ? error.message : 'Could not sign out.');
+      router.replace('/signin');
+    } catch (signOutError) {
+      setError(signOutError instanceof Error ? signOutError.message : 'Could not sign out.');
+      setIsSigningOut(false);
     }
   };
 
   return (
-    <div className="flex-1 p-4 sm:p-10 space-y-8 max-w-4xl mx-auto w-full font-mono text-xs text-slate-800 bg-white">
-      {/* Header */}
-      <div className="pb-6 border-b border-slate-200 space-y-1">
-        <div className="text-[10px] text-cyan-700 uppercase tracking-wider font-semibold">
-          SYSTEM CONFIGURATION
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight font-sans">
-          Operator Profile &amp; Preferences
-        </h1>
-        <p className="font-sans text-xs text-slate-500">
-          Manage your credentials, theme appearance, analytical measurement units, and security sessions.
+    <div className="mx-auto w-full max-w-3xl space-y-6 p-4 sm:p-8">
+      <header>
+        <h1 className="text-2xl font-semibold text-slate-900">Settings &amp; Preferences</h1>
+        <p className="mt-1 text-sm text-slate-600">Update your operator profile and analysis preferences.</p>
+      </header>
+
+      {error && (
+        <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {error}
         </p>
-      </div>
+      )}
+      {notice && (
+        <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          {notice}
+        </p>
+      )}
 
-      {/* Form */}
-      <form onSubmit={handleSaveProfile} className="space-y-6">
-        {/* Credentials */}
-        <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-5 shadow-xs">
-          <div className="flex items-center space-x-2 text-cyan-800 font-semibold text-sm">
-            <User className="w-4 h-4 text-cyan-600" />
-            <span className="font-sans">Field Operator Credentials</span>
+      <form onSubmit={(event) => void handleSave(event)} className="space-y-6">
+        <section className="space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-xs sm:p-6">
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <UserRound className="h-4 w-4 text-cyan-700" />
+            <h2>Operator information</h2>
           </div>
 
-          <div className="flex items-center space-x-4 pb-2 border-b border-slate-100">
-            <div className="w-12 h-12 rounded-full bg-cyan-600 text-white flex items-center justify-center font-bold text-base shadow-xs shrink-0">
-              {profile.name.charAt(0)}
+          <div className="flex flex-wrap items-center gap-4 border-b border-slate-100 pb-4">
+            <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full bg-cyan-700 text-lg font-semibold text-white">
+              {profile.avatar_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={profile.avatar_url} alt="Profile photo" className="h-full w-full object-cover" />
+              ) : (
+                profile.name.charAt(0).toUpperCase()
+              )}
             </div>
-            <div>
-              <div className="text-sm font-bold text-slate-900 font-sans">{profile.name}</div>
-              <div className="text-xs text-slate-500">{profile.email || 'analyst@floodsense.ai'}</div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-medium text-slate-900">{profile.name}</p>
+              <p className="truncate text-sm text-slate-500">{profile.email}</p>
             </div>
+            <input
+              ref={avatarInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={(event) => void handleAvatarUpload(event)}
+            />
+            <button
+              type="button"
+              onClick={() => avatarInputRef.current?.click()}
+              disabled={isUploadingAvatar}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60"
+            >
+              <Camera className="h-4 w-4" />
+              {isUploadingAvatar ? 'Uploading…' : 'Upload profile photo'}
+            </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-[11px] text-slate-600 font-medium">OPERATOR DISPLAY NAME</label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="space-y-1.5 text-sm text-slate-700">
+              <span>Display name</span>
               <input
                 type="text"
-                value={profile.name}
-                onChange={(e) => setProfile({ ...profile, name: e.target.value })}
-                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-cyan-600 transition-colors"
                 required
+                value={profile.name}
+                onChange={(event) => setProfile({ ...profile, name: event.target.value })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-cyan-600"
               />
-            </div>
+            </label>
 
-            <div className="space-y-1.5">
-              <label className="text-[11px] text-slate-600 font-medium">OPERATIONAL ROLE</label>
+            <label className="space-y-1.5 text-sm text-slate-700">
+              <span>Email</span>
+              <input
+                type="email"
+                value={profile.email}
+                readOnly
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600"
+              />
+            </label>
+
+            <label className="space-y-1.5 text-sm text-slate-700">
+              <span>Operational role</span>
               <select
                 value={profile.role}
-                onChange={(e) => setProfile({ ...profile, role: e.target.value as any })}
-                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-cyan-600 transition-colors"
+                onChange={(event) => {
+                  if (isUserRole(event.target.value)) {
+                    setProfile({ ...profile, role: event.target.value });
+                  }
+                }}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-cyan-600"
               >
-                <option value="responder">Emergency Responder (Tactical Field)</option>
-                <option value="researcher">Hydrology Researcher (Analytical)</option>
-                <option value="journalist">Public Civil Correspondent</option>
-                <option value="citizen">Citizen Recon Observer</option>
+                <option value="responder">Emergency responder</option>
+                <option value="researcher">Hydrology researcher</option>
+                <option value="journalist">Public correspondent</option>
+                <option value="citizen">Citizen observer</option>
               </select>
-            </div>
+            </label>
+
+            <label className="space-y-1.5 text-sm text-slate-700">
+              <span>Default region</span>
+              <input
+                type="text"
+                value={profile.region || ''}
+                onChange={(event) => setProfile({ ...profile, region: event.target.value })}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-cyan-600"
+              />
+            </label>
           </div>
+        </section>
 
-          <div className="space-y-1.5">
-            <label className="text-[11px] text-slate-600 font-medium">DEFAULT RIVER BASIN / REGION</label>
-            <input
-              type="text"
-              value={profile.region}
-              onChange={(e) => setProfile({ ...profile, region: e.target.value })}
-              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-cyan-600 transition-colors"
-            />
-          </div>
-        </div>
-
-        {/* Theme Preferences */}
-        <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-4 shadow-xs">
-          <div className="flex items-center space-x-2 text-cyan-800 font-semibold text-sm">
-            <Sun className="w-4 h-4 text-cyan-600" />
-            <span className="font-sans">Theme &amp; Appearance</span>
-          </div>
-
-          <p className="font-sans text-xs text-slate-500">
-            Choose your preferred interface theme. Selected theme is persisted across all pages and sessions.
-          </p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-            <button
-              type="button"
-              onClick={() => handleThemeChange('light')}
-              className={`p-3 rounded-lg border text-left transition-all space-y-2 ${
-                themePref === 'light'
-                  ? 'bg-cyan-50 border-cyan-500 text-slate-900 shadow-xs'
-                  : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <Sun className="w-4 h-4 text-amber-500" />
-                {themePref === 'light' && <span className="text-[10px] text-cyan-700 font-bold">Active</span>}
-              </div>
-              <div className="font-bold text-xs font-sans">Light Mode (Default)</div>
-              <div className="text-[10px] text-slate-500 font-sans">Crisp daylight white styling</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleThemeChange('dark')}
-              className={`p-3 rounded-lg border text-left transition-all space-y-2 ${
-                themePref === 'dark'
-                  ? 'bg-cyan-50 border-cyan-500 text-slate-900 shadow-xs'
-                  : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <Moon className="w-4 h-4 text-cyan-600" />
-                {themePref === 'dark' && <span className="text-[10px] text-cyan-700 font-bold">Active</span>}
-              </div>
-              <div className="font-bold text-xs font-sans">Dark Mode</div>
-              <div className="text-[10px] text-slate-500 font-sans">Night operations palette</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleThemeChange('system')}
-              className={`p-3 rounded-lg border text-left transition-all space-y-2 ${
-                themePref === 'system'
-                  ? 'bg-cyan-50 border-cyan-500 text-slate-900 shadow-xs'
-                  : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <Monitor className="w-4 h-4 text-slate-500" />
-                {themePref === 'system' && <span className="text-[10px] text-cyan-700 font-bold">Active</span>}
-              </div>
-              <div className="font-bold text-xs font-sans">System Default</div>
-              <div className="text-[10px] text-slate-500 font-sans">Synchronizes with OS schedule</div>
-            </button>
-          </div>
-        </div>
-
-        {/* Units & Tone */}
-        <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-4 shadow-xs">
-          <div className="flex items-center space-x-2 text-cyan-800 font-semibold text-sm">
-            <Sliders className="w-4 h-4 text-cyan-600" />
-            <span className="font-sans">Analytical &amp; Unit Standards</span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-[11px] text-slate-600 font-medium">MEASUREMENT SYSTEM</label>
-              <div className="flex space-x-2">
-                {(['metric', 'imperial'] as const).map((u) => (
-                  <button
-                    type="button"
-                    key={u}
-                    onClick={() =>
-                      setProfile({
-                        ...profile,
-                        prefs: { ...profile.prefs, unit: u },
-                      })
-                    }
-                    className={`px-4 py-2 rounded-lg border uppercase text-xs transition-colors font-sans font-medium ${
-                      profile.prefs.unit === u
-                        ? 'bg-cyan-600 text-white border-cyan-600'
-                        : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
-                    }`}
-                  >
-                    {u === 'metric' ? 'Metric (m, ha)' : 'Imperial (ft, acres)'}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[11px] text-slate-600 font-medium">SITREP REPORTING TONE</label>
+        <section className="space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-xs sm:p-6">
+          <h2 className="text-sm font-semibold text-slate-900">Analysis preferences</h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="space-y-1.5 text-sm text-slate-700">
+              <span>Measurement units</span>
               <select
-                value={profile.prefs.tone}
-                onChange={(e) =>
-                  setProfile({
-                    ...profile,
-                    prefs: { ...profile.prefs, tone: e.target.value as any },
-                  })
-                }
-                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-cyan-600 transition-colors"
+                value={profile.prefs?.unit || 'metric'}
+                onChange={(event) => setProfile({
+                  ...profile,
+                  prefs: { ...CURRENT_USER.prefs, ...profile.prefs, unit: event.target.value as MeasurementUnit },
+                })}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-cyan-600"
               >
-                <option value="concise_tactical">Concise Tactical (Command Directives)</option>
-                <option value="comprehensive_analytical">Comprehensive Analytical (Hydrology)</option>
-                <option value="public_bulletin">Public Civil Bulletin</option>
+                <option value="metric">Metric</option>
+                <option value="imperial">Imperial</option>
               </select>
-            </div>
-          </div>
-        </div>
+            </label>
 
-        {/* Save Button */}
-        <div className="flex items-center justify-between pt-1">
+            <label className="space-y-1.5 text-sm text-slate-700">
+              <span>Report tone</span>
+              <select
+                value={profile.prefs?.tone || 'concise_tactical'}
+                onChange={(event) => setProfile({
+                  ...profile,
+                  prefs: {
+                    ...CURRENT_USER.prefs,
+                    ...profile.prefs,
+                    tone: event.target.value as ReportTone,
+                  },
+                })}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-cyan-600"
+              >
+                <option value="concise_tactical">Concise and tactical</option>
+                <option value="comprehensive_analytical">Comprehensive and analytical</option>
+                <option value="public_bulletin">Public bulletin</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <button
             type="submit"
-            className="px-6 py-2.5 bg-cyan-600 hover:bg-cyan-700 text-white font-medium rounded-lg flex items-center space-x-2 transition-colors shadow-xs font-sans text-sm"
+            disabled={isSaving}
+            className="inline-flex items-center gap-2 rounded-lg bg-cyan-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-cyan-800 disabled:opacity-60"
           >
-            {saved ? <CheckCircle2 className="w-4 h-4" /> : null}
-            <span>{saved ? saveMessage : 'Save Configurations'}</span>
+            <Save className="h-4 w-4" />
+            {isSaving ? 'Saving…' : 'Save profile and preferences'}
           </button>
-        </div>
-      </form>
-
-      {/* Security & Password */}
-      <form onSubmit={handlePasswordUpdate} className="bg-white border border-slate-200 rounded-xl p-6 space-y-4 shadow-xs">
-        <div className="flex items-center space-x-2 text-cyan-800 font-semibold text-sm">
-          <KeyRound className="w-4 h-4 text-cyan-600" />
-          <span className="font-sans">Security &amp; Password Management</span>
-        </div>
-
-        {passwordNotice && (
-          <div
-            className={`p-3 rounded-lg border text-xs flex items-center gap-2 ${
-              passwordNotice.includes('successfully')
-                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                : 'bg-red-50 border-red-200 text-red-700'
-            }`}
-          >
-            <AlertTriangle className="w-4 h-4 shrink-0" />
-            <span>{passwordNotice}</span>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="space-y-1.5">
-            <label className="text-[11px] text-slate-600 font-medium">CURRENT PASSWORD</label>
-            <input
-              type={showPassword ? 'text' : 'password'}
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              placeholder="••••••••"
-              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-cyan-600 transition-colors"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-[11px] text-slate-600 font-medium">NEW PASSWORD</label>
-            <input
-              type={showPassword ? 'text' : 'password'}
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              placeholder="8+ characters"
-              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-cyan-600 transition-colors"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-[11px] text-slate-600 font-medium">CONFIRM NEW PASSWORD</label>
-            <input
-              type={showPassword ? 'text' : 'password'}
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              placeholder="Repeat new password"
-              className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-cyan-600 transition-colors"
-            />
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between pt-1">
           <button
             type="button"
-            onClick={() => setShowPassword(!showPassword)}
-            className="text-[11px] text-slate-500 hover:text-slate-800 flex items-center gap-1.5 font-sans"
+            onClick={() => void handleSignOut()}
+            disabled={isSigningOut}
+            className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-4 py-2.5 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-60"
           >
-            {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-            <span>{showPassword ? 'Hide Passwords' : 'Show Passwords'}</span>
-          </button>
-
-          <button
-            type="submit"
-            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-800 rounded-lg transition-colors font-sans"
-          >
-            Update Password
+            <LogOut className="h-4 w-4" />
+            {isSigningOut ? 'Signing out…' : 'Sign out'}
           </button>
         </div>
       </form>
-
-      {/* ── LIVE BACKEND REST API EXPLORER ── */}
-      <BackendApiPlayground />
-
-      {/* Session Management */}
-      <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-4 shadow-xs">
-        <div className="flex items-center space-x-2 text-cyan-800 font-semibold text-sm">
-          <Shield className="w-4 h-4 text-cyan-600" />
-          <span className="font-sans">Session Details</span>
-        </div>
-
-        <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-slate-500">Connected Backend API:</span>
-            <span className="text-cyan-800 font-semibold">
-              {BACKEND_URL}
-            </span>
-          </div>
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-slate-500">Segmentation Model:</span>
-            <span className="text-emerald-700 font-medium">Fine-Tuned SegFormer (0.4797 mIoU) &bull; Verified</span>
-          </div>
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-slate-500">Storage Synchronization:</span>
-            <span className="text-slate-700">Supabase Database &amp; Private Storage</span>
-          </div>
-        </div>
-
-        <div className="pt-2 flex items-center justify-between">
-          <span className="text-xs text-slate-500 font-sans">End active session:</span>
-          <button
-            onClick={handleSignOut}
-            className="px-4 py-2 bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 rounded-lg text-xs flex items-center space-x-2 transition-colors font-sans font-medium"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>Sign Out</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Data Purge */}
-      <div className="border border-red-200 bg-red-50/50 rounded-xl p-6 space-y-3">
-        <div className="text-red-700 font-semibold flex items-center space-x-2 text-sm font-sans">
-          <Trash2 className="w-4 h-4" />
-          <span>Data Privacy &amp; Cloud History Purge</span>
-        </div>
-        <p className="font-sans text-xs text-slate-600 leading-relaxed">
-          Permanently remove your saved inspection conversations, reports, and uploaded UAV imagery from Supabase.
-        </p>
-        <button
-          type="button"
-          onClick={handlePurgeHistory}
-          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg text-xs transition-colors flex items-center space-x-2 font-sans shadow-xs"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-          <span>Delete All Cloud Records</span>
-        </button>
-      </div>
     </div>
   );
 }

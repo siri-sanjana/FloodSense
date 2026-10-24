@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Plus, Image as ImageIcon, BookOpen, Download, SunMoon, Shield } from 'lucide-react';
+import { Search, Plus, Image as ImageIcon, Download } from 'lucide-react';
 import type { ChatThread } from '../lib/api';
 
 interface CommandPaletteProps {
@@ -25,15 +25,11 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        isOpen ? onClose() : null; // toggle or handled by parent
-      }
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [onClose]);
 
   if (!isOpen) return null;
 
@@ -79,7 +75,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               <Plus className="w-3.5 h-3.5 text-[#D9822B]" />
               <span>Initiate New UAV Inspection Pass</span>
             </div>
-            <kbd className="text-[10px] font-mono text-silt-500">Ctrl+N</kbd>
           </button>
 
           <button
@@ -116,19 +111,12 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                 onClose();
                 router.push(`/app/chat/${thread.id}`);
               }}
-              className="w-full flex items-center justify-between px-3 py-2 text-left text-xs text-silt-200 hover:bg-abyss-900 hairline-all border-transparent hover:border-abyss-700 transition-colors"
+              className="w-full flex items-center px-3 py-2 text-left text-xs text-silt-200 hover:bg-abyss-900 hairline-all border-transparent hover:border-abyss-700 transition-colors"
             >
               <div>
                 <div className="font-medium">{thread.title}</div>
                 <div className="text-[10px] font-mono text-silt-500">{thread.location_tag}</div>
               </div>
-              <span className={`text-[10px] font-mono px-1.5 py-0.5 ${
-                thread.severity === 'CRITICAL' || thread.severity === 'CATASTROPHIC'
-                  ? 'text-[#D9822B] bg-[#D9822B]/10'
-                  : 'text-silt-400'
-              }`}>
-                {thread.severity}
-              </span>
             </button>
           ))}
         </div>

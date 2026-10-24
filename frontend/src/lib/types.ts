@@ -24,9 +24,11 @@ export interface SegmentationClass {
 }
 
 export interface DamageStats {
-  severity_score: number; // 0.0 to 10.0 (Tide Gauge)
+  severity_score: number; // Uncalibrated image-class proxy, not field severity.
   severity_level: 'LOW' | 'MODERATE' | 'CRITICAL' | 'CATASTROPHIC';
-  total_inundated_area_m2: number;
+  total_inundated_area_m2: number | null;
+  total_inundated_pixels: number;
+  flood_coverage_pct: number;
   flooded_buildings_count: number;
   safe_buildings_count: number;
   flooded_roads_km: number | null;

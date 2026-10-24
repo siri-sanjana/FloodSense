@@ -230,7 +230,7 @@ export default function Standalone3DDigitalTwinPage() {
     { id: 2, name: 'Building-Non-Flooded', color: '#B47878', desc: 'Safe elevated structures (ridge)', count: 'Class 2' },
     { id: 3, name: 'Road-Flooded', color: '#CA8A04', desc: 'Severed low-lying roadways (<1.2m)', count: 'Class 3' },
     { id: 4, name: 'Road-Non-Flooded', color: '#8C8C8C', desc: 'Safe elevated viaduct overpass (+3.3m)', count: 'Class 4' },
-    { id: 5, name: 'Water', color: '#A7F3D0', desc: 'Inundation mesh & drainage canal', count: 'Class 5' },
+    { id: 5, name: 'Water', color: '#0284C7', desc: 'Inundation mesh & drainage canal', count: 'Class 5' },
     { id: 6, name: 'Tree', color: '#059669', desc: 'Riparian buffer vegetation canopy', count: 'Class 6' },
     { id: 7, name: 'Vehicle', color: '#7C3AED', desc: 'Mobile assets and transit vehicles', count: 'Class 7' },
     { id: 8, name: 'Pool', color: '#06B6D4', desc: 'Engineered stormwater retention basin', count: 'Class 8' },

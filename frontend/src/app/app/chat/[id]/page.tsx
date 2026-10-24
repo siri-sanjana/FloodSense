@@ -43,7 +43,7 @@ const FLOODNET_CLASSES = [
   { name: 'building-non-flooded', color: '#b47878' },
   { name: 'road-flooded', color: '#a09614' },
   { name: 'road-non-flooded', color: '#8c8c8c' },
-  { name: 'water', color: '#3de6fa' },
+  { name: 'water', color: '#A7F3D0' },
   { name: 'tree', color: '#0052ff' },
   { name: 'vehicle', color: '#ff00f5' },
   { name: 'pool', color: '#ffeb00' },

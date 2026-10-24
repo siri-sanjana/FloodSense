@@ -47,7 +47,7 @@ const FLOODNET_CLASSES = [
   { name: 'tree', color: '#0052ff' },
   { name: 'vehicle', color: '#ff00f5' },
   { name: 'pool', color: '#ffeb00' },
-  { name: 'grass', color: '#04fa07' },
+  { name: 'grass', displayName: 'Grass -> Water', color: '#0284C7' },
 ];
 
 function mapDamageStats(metrics: DamageMetrics): DamageStats {
@@ -83,12 +83,14 @@ function mapDamageStats(metrics: DamageMetrics): DamageStats {
         Math.round(((Number(distribution[floodClass.name]) || 0) / 100) * 512 * 512);
       return {
         id,
-        name: floodClass.name.replaceAll('-', ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
+        name: (floodClass.displayName || floodClass.name)
+          .replaceAll('-', ' ')
+          .replace(/\b\w/g, (char) => char.toUpperCase()),
         color: floodClass.color,
         pixel_count: pixelCount,
         area_m2: null,
         percentage: (pixelCount / (512 * 512)) * 100,
-        is_flooded: [1, 3, 5, 8].includes(id),
+        is_flooded: [1, 3, 5, 8, 9].includes(id),
       };
     }),
   };

@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import {
   ArrowRight,
@@ -8,80 +9,20 @@ import {
   Eye,
   MessageSquare,
   Layers,
-  Building,
-  Cpu,
   ChevronRight,
   Waves,
-  AlertTriangle,
   Droplets,
-  ShieldCheck,
-  CheckCircle2,
   FileText
 } from 'lucide-react';
 import { FloodHero3D } from '../components/three/FloodHero3D';
-import { MaskViewer } from '../components/MaskViewer';
-import { TideGauge } from '../components/TideGauge';
 import { FloodSenseLogo } from '../components/ui/FloodSenseLogo';
+import {
+  FLOODNET_DATASET_DESCRIPTION,
+  FLOODNET_CLASS_NAMES,
+  FLOODNET_SAMPLES,
+} from '../lib/floodnet-samples';
 
 export default function LandingPage() {
-  const [selectedWalkthrough, setSelectedWalkthrough] = useState<'10169' | '10815' | '6423'>('10169');
-
-  const WALKTHROUGH_SAMPLES = {
-    '10169': {
-      title: 'Pass 10169: Residential Periyar Basin Inundation',
-      image: '/samples/10169.jpg',
-      mask: '/samples/10169_mask.png',
-      location: 'Kochi Suburban Basin (Periyar Axis)',
-      floodedBuildings: 16,
-      inundatedArea: '3.82 Hectares',
-      waterLevel: 1.92,
-      dangerThreshold: 2.20,
-      tidePhase: 'Rising Surge',
-      impassableRoad: '1.4 km Submerged',
-      cause: 'Embankment Overflow',
-      severity: '8.1 / 10',
-      sampleQ: 'What areas appear to be flooded in this image?',
-      sampleA: 'Residential inundation detected spanning 3.82 hectares. Submersion extends across residential parcel perimeters with 16 structural footprints confirmed compromised under disaster management protocols.',
-      roadStatus: 'Access Arterial 12-B Cut Off',
-    },
-    '10815': {
-      title: 'Pass 10815: Canal Breach & Highway Overwash',
-      image: '/samples/10815.jpg',
-      mask: '/samples/10815_mask.png',
-      location: 'Cuttack Mahanadi Embankment',
-      floodedBuildings: 21,
-      inundatedArea: '5.14 Hectares',
-      waterLevel: 2.45,
-      dangerThreshold: 2.20,
-      tidePhase: 'Crest Stage',
-      impassableRoad: '2.8 km Submerged',
-      cause: 'Canal Dike Rupture',
-      severity: '8.7 / 10',
-      sampleQ: 'Which buildings appear to be affected?',
-      sampleA: 'A total of 21 single- and multi-story structures show immediate standing water at foundation sill levels. The evacuation corridor along the western canal bank is submerged and impassable.',
-      roadStatus: 'Secondary Highway 4 Severed',
-    },
-    '6423': {
-      title: 'Pass 6423: Riverine Bridge Embankment Scour',
-      image: '/samples/6423.jpg',
-      mask: '/samples/6423_mask.png',
-      location: 'Brahmaputra Lowland Causeway',
-      floodedBuildings: 9,
-      inundatedArea: '2.90 Hectares',
-      waterLevel: 1.65,
-      dangerThreshold: 2.20,
-      tidePhase: 'Receding Flood',
-      impassableRoad: '0.8 km Submerged',
-      cause: 'Bridge Backwater Surge',
-      severity: '7.2 / 10',
-      sampleQ: 'Can you summarize the visible flood damage?',
-      sampleA: 'Rapid surface runoff has submerged approach spans on both banks. 9 riverfront storage depots are affected; the bridge deck remains above crest line but pier scouring inspection is recommended.',
-      roadStatus: 'Bridge Access Restricted',
-    },
-  };
-
-  const activeWalkthrough = WALKTHROUGH_SAMPLES[selectedWalkthrough];
-
   return (
     <div className="relative min-h-screen bg-white text-slate-900 selection:bg-cyan-100 selection:text-cyan-900 font-sans">
       {/* ─────────────────────────── TOP NAVIGATION ─────────────────────────── */}
@@ -95,8 +36,8 @@ export default function LandingPage() {
             <a href="#capabilities-workflow" className="hover:text-cyan-700 transition-colors">
               Capabilities &amp; Workflow
             </a>
-            <a href="#dashboard-walkthrough" className="hover:text-cyan-700 transition-colors">
-              Dashboard &amp; Walkthrough
+            <a href="#dataset" className="hover:text-cyan-700 transition-colors">
+              Dataset
             </a>
           </nav>
 
@@ -129,7 +70,7 @@ export default function LandingPage() {
 
               {/* Supporting Description */}
               <p className="text-base sm:text-lg text-slate-600 max-w-2xl leading-relaxed">
-                Inspect high-resolution drone and aerial flood imagery, run verified 10-class segmentation,
+                Inspect high-resolution drone and aerial flood imagery, run 10-class segmentation,
                 ask questions in natural language, and generate grounded impact assessments.
               </p>
 
@@ -156,24 +97,8 @@ export default function LandingPage() {
             </div>
 
             {/* Right Hero Column: 3D Surface Model Preview */}
-            <div className="lg:col-span-5 bg-white border border-slate-200 rounded-xl p-3 shadow-md overflow-hidden">
+            <div className="lg:col-span-5 overflow-hidden rounded-xl">
               <FloodHero3D />
-
-              {/* Summary Metrics Bar below 3D scene */}
-              <div className="p-3 bg-slate-50 border-t border-slate-200 rounded-b-lg grid grid-cols-3 gap-2 font-mono text-center">
-                <div className="p-2 bg-white rounded border border-slate-200">
-                  <div className="text-base font-bold text-slate-900">3.82 ha</div>
-                  <div className="text-[10px] text-slate-500">Inundation Extent</div>
-                </div>
-                <div className="p-2 bg-white rounded border border-slate-200">
-                  <div className="text-base font-bold text-cyan-700">16 Structures</div>
-                  <div className="text-[10px] text-slate-500">Submerged</div>
-                </div>
-                <div className="p-2 bg-white rounded border border-slate-200">
-                  <div className="text-base font-bold text-slate-900">1.92 m</div>
-                  <div className="text-[10px] text-slate-500">Water Depth</div>
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -265,7 +190,7 @@ export default function LandingPage() {
             </Link>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="p-5 bg-white border border-slate-200 rounded-xl space-y-3 shadow-xs">
               <Layers className="w-6 h-6 text-cyan-600" />
               <h4 className="font-bold text-slate-900 text-sm">10-Class Semantic Mapping</h4>
@@ -282,151 +207,68 @@ export default function LandingPage() {
               </p>
             </div>
 
-            <div className="p-5 bg-white border border-slate-200 rounded-xl space-y-3 shadow-xs">
-              <Building className="w-6 h-6 text-cyan-600" />
-              <h4 className="font-bold text-slate-900 text-sm">Structural Triage Scoring</h4>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Calculates structural compromise tiers (Critical, Moderate, Low) based on water boundary proximity and submersion.
-              </p>
-            </div>
-
-            <div className="p-5 bg-white border border-slate-200 rounded-xl space-y-3 shadow-xs">
-              <Cpu className="w-6 h-6 text-cyan-600" />
-              <h4 className="font-bold text-slate-900 text-sm">Offline Field Resilience</h4>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Maintains full local inspection capability with persistent storage when network connectivity is lost in the field.
-              </p>
-            </div>
           </div>
         </div>
       </section>
 
-      {/* ─────────────────────────── COMBINED SECTION 3: DASHBOARD & WALKTHROUGH ─────────────────────────── */}
-      <section id="dashboard-walkthrough" className="py-20 px-4 sm:px-6 max-w-7xl mx-auto border-b border-slate-200">
-        <div className="text-center space-y-3 max-w-3xl mx-auto mb-10">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-cyan-50 border border-cyan-200 rounded text-xs font-mono text-cyan-800">
-            <span>LIVE INTERACTIVE EVALUATION</span>
-          </div>
-          <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900">
-            Interactive Dashboard &amp; Reconnaissance Walkthrough
+      <section id="dataset" className="border-b border-slate-200 bg-slate-50 px-4 py-16 sm:px-6">
+        <div className="mx-auto max-w-4xl space-y-4 text-center">
+          <h2 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+            FloodNet research dataset
           </h2>
-          <p className="text-base text-slate-600">
-            Select a reconnaissance pass to inspect verified segmentation mask overlays, gauge hydrological severity, and review impact summaries.
+          <p className="text-sm leading-relaxed text-slate-600">
+            {FLOODNET_DATASET_DESCRIPTION}
           </p>
-        </div>
-
-        {/* Reconnaissance Pass Switcher Tabs */}
-        <div className="flex flex-wrap justify-center gap-2 mb-8 font-mono text-xs">
-          {(['10169', '10815', '6423'] as const).map((id) => (
-            <button
-              key={id}
-              onClick={() => setSelectedWalkthrough(id)}
-              className={`px-4 py-2 rounded-lg transition-colors border ${
-                selectedWalkthrough === id
-                  ? 'bg-cyan-600 text-white font-semibold border-cyan-600 shadow-xs'
-                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-              }`}
-            >
-              {WALKTHROUGH_SAMPLES[id].title.split(':')[0]}
-            </button>
-          ))}
-        </div>
-
-        {/* Combined Dashboard & Walkthrough Container */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* Main Inspection & Walkthrough Q&A View */}
-          <div className="lg:col-span-8 bg-white border border-slate-200 rounded-xl p-5 space-y-5 shadow-sm">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200 text-xs font-mono">
-              <div className="flex items-center space-x-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-600" />
-                <span className="text-slate-900 font-semibold">{activeWalkthrough.title}</span>
-                <span className="text-slate-500 hidden sm:inline">({activeWalkthrough.location})</span>
-              </div>
-              <span className="text-[10px] text-cyan-700 px-2 py-0.5 bg-cyan-50 border border-cyan-200 rounded font-semibold">
-                SEVERITY {activeWalkthrough.severity}
-              </span>
-            </div>
-
-            {/* Mask Viewer Component */}
-            <div className="rounded-lg overflow-hidden border border-slate-200">
-              <MaskViewer
-                sampleId={String(selectedWalkthrough)}
-                rawImageUrl={activeWalkthrough.image}
-                maskImageUrl={activeWalkthrough.mask}
-              />
-            </div>
-
-            <div className="text-[11px] font-mono text-slate-500">
-              Drag slider or toggle opacity to verify flood boundary classification against true optical imagery.
-            </div>
-
-            {/* Interactive Q&A Turn for Active Pass */}
-            <div className="pt-3 border-t border-slate-200 space-y-3 font-mono text-xs">
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-1">
-                <div className="text-[10px] text-slate-500 font-semibold">FIELD OPERATOR INQUIRY:</div>
-                <div className="text-sm font-sans text-slate-900">&ldquo;{activeWalkthrough.sampleQ}&rdquo;</div>
-              </div>
-
-              <div className="p-4 bg-white border border-cyan-200 rounded-lg space-y-2 shadow-2xs">
-                <div className="text-[10px] text-cyan-800 font-semibold flex items-center justify-between">
-                  <span>FLOODSENSE SITREP SUMMARY</span>
-                  <span className="text-emerald-700 font-medium">VERIFIED</span>
-                </div>
-                <p className="text-xs font-sans text-slate-700 leading-relaxed">
-                  {activeWalkthrough.sampleA}
-                </p>
-                <div className="pt-2 text-[11px] text-amber-700 flex items-center gap-1.5 border-t border-slate-100 font-medium font-sans">
-                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                  <span>Roadway Status: {activeWalkthrough.roadStatus}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Right Metrics & Tide Gauge */}
-          <div className="lg:col-span-4 space-y-6">
-            <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-              <TideGauge
-                currentWaterLevelMeters={activeWalkthrough.waterLevel}
-                dangerThresholdMeters={activeWalkthrough.dangerThreshold}
-                tidePhase={activeWalkthrough.tidePhase}
-              />
-            </div>
-
-            <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4 font-mono text-xs shadow-sm">
-              <div className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center justify-between">
-                <span>Sector Damage Tallies</span>
-                <span className="text-amber-700 font-semibold">Live Incident</span>
-              </div>
-
-              <div className="space-y-2.5">
-                <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded border border-slate-200">
-                  <span className="text-slate-600">Total Inundated Area:</span>
-                  <span className="font-bold text-cyan-800">{activeWalkthrough.inundatedArea}</span>
-                </div>
-                <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded border border-slate-200">
-                  <span className="text-slate-600">Flooded Structures:</span>
-                  <span className="font-bold text-red-600">{activeWalkthrough.floodedBuildings} Buildings</span>
-                </div>
-                <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded border border-slate-200">
-                  <span className="text-slate-600">Impassable Roadway:</span>
-                  <span className="font-bold text-amber-700">{activeWalkthrough.impassableRoad}</span>
-                </div>
-                <div className="flex items-center justify-between p-2.5 bg-slate-50 rounded border border-slate-200">
-                  <span className="text-slate-600">Primary Cause:</span>
-                  <span className="text-slate-900 font-medium">{activeWalkthrough.cause}</span>
-                </div>
-              </div>
-
-              <Link
-                href="/signin"
-                className="w-full py-2.5 bg-cyan-600 hover:bg-cyan-700 text-white font-medium text-xs font-mono rounded-lg flex items-center justify-center space-x-2 transition-colors shadow-xs"
+          <p className="text-xs leading-relaxed text-slate-500">
+            Semantic classes: {FLOODNET_CLASS_NAMES.join(', ')}. These examples pair the original
+            images with their FloodNet ground-truth annotation masks; masks are labels, not model predictions.
+          </p>
+          <div className="grid gap-5 pt-5 text-left md:grid-cols-3">
+            {Object.values(FLOODNET_SAMPLES).map((sample) => (
+              <article
+                key={sample.id}
+                className="overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-800 shadow-xs"
               >
-                <span>Launch This Incident in Studio</span>
-                <ArrowRight className="w-4 h-4" />
-              </Link>
-            </div>
+                <h3 className="px-4 py-3 text-sm font-semibold">{sample.title}</h3>
+                <div className="grid grid-cols-2 border-y border-slate-200">
+                  <div className="border-r border-slate-200">
+                    <Image
+                      src={sample.image}
+                      alt={`FloodNet aerial image ${sample.id}`}
+                      width={1024}
+                      height={682}
+                      unoptimized
+                      className="aspect-[3/2] w-full object-cover"
+                    />
+                    <p className="px-2 py-2 text-center text-[10px] font-mono text-slate-600">
+                      Input image
+                    </p>
+                  </div>
+                  <div>
+                    <Image
+                      src={sample.mask}
+                      alt={`FloodNet ground-truth segmentation annotation for image ${sample.id}`}
+                      width={1024}
+                      height={682}
+                      unoptimized
+                      className="aspect-[3/2] w-full object-cover"
+                    />
+                    <p className="px-2 py-2 text-center text-[10px] font-mono text-slate-600">
+                      Ground-truth mask
+                    </p>
+                  </div>
+                </div>
+                <p className="px-4 py-3 text-xs leading-relaxed text-slate-600">{sample.scene}</p>
+              </article>
+            ))}
           </div>
+          <Link
+            href="/signin"
+            className="inline-flex items-center gap-2 rounded-lg bg-cyan-600 px-4 py-2.5 text-xs font-medium text-white shadow-xs transition-colors hover:bg-cyan-700"
+          >
+            <span>Analyze your image in Studio</span>
+            <ArrowRight className="h-4 w-4" />
+          </Link>
         </div>
       </section>
 
@@ -434,9 +276,6 @@ export default function LandingPage() {
       <section className="py-20 px-4 sm:px-6 max-w-7xl mx-auto border-b border-slate-200">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
           <div className="lg:col-span-6 space-y-4">
-            <div className="text-xs font-mono text-cyan-700 tracking-wider uppercase font-semibold">
-              INTERACTIVE 3D SIMULATOR
-            </div>
             <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-slate-900">
               Real-Time 3D Flood Simulator
             </h2>
@@ -532,7 +371,7 @@ export default function LandingPage() {
             </div>
             <ul className="space-y-1.5 text-[11px]">
               <li><a href="#capabilities-workflow" className="hover:text-cyan-700">Capabilities &amp; Workflow</a></li>
-              <li><a href="#dashboard-walkthrough" className="hover:text-cyan-700">Dashboard &amp; Walkthrough</a></li>
+              <li><a href="#dataset" className="hover:text-cyan-700">FloodNet dataset</a></li>
             </ul>
           </div>
 
@@ -551,12 +390,6 @@ export default function LandingPage() {
         <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-slate-500">
           <div>
             &copy; {new Date().getFullYear()} FloodSense Platform.
-          </div>
-          <div className="flex items-center space-x-4">
-            <span className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
-              <span>System Operational</span>
-            </span>
           </div>
         </div>
       </footer>

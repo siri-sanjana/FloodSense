@@ -318,7 +318,11 @@ export const BackendApiPlayground: React.FC = () => {
                     {m.description}
                   </p>
                   <div className="pt-2 border-t border-slate-200/80 flex items-center justify-between text-[11px]">
-                    <span className="text-slate-500">mIoU: <strong className="text-slate-900">{(m.mIoU * 100).toFixed(1)}%</strong></span>
+                    <span className="text-slate-500">
+                      mIoU: <strong className="text-slate-900">
+                        {m.mIoU == null ? 'Not measured' : `${(m.mIoU * 100).toFixed(1)}%`}
+                      </strong>
+                    </span>
                     <span className="text-slate-500">
                       Latency: <strong className="text-cyan-800">{m.latency_ms == null ? 'Not measured' : `${m.latency_ms}ms`}</strong>
                     </span>
@@ -466,7 +470,7 @@ export const BackendApiPlayground: React.FC = () => {
                       <div className="flex justify-between">
                         <span className="text-slate-500">Damage Severity:</span>
                         <strong className="text-red-600">
-                          {segmentResult.damage_metrics?.damage_summary?.severity_label} ({segmentResult.damage_metrics?.damage_summary?.damage_severity_score} / 100)
+                          {segmentResult.damage_metrics?.damage_summary?.severity_label} image-class proxy ({segmentResult.damage_metrics?.damage_summary?.damage_severity_score} / 100)
                         </strong>
                       </div>
                       <div className="flex justify-between">
@@ -484,7 +488,7 @@ export const BackendApiPlayground: React.FC = () => {
                       <div className="flex justify-between">
                         <span className="text-slate-500">Inundation Area:</span>
                         <strong className="text-cyan-800">
-                          {segmentResult.damage_metrics?.damage_summary?.total_flood_area_m2} m&sup2;
+                          {segmentResult.damage_metrics?.damage_summary?.total_flood_area_px?.toLocaleString()} flood-class pixels
                         </strong>
                       </div>
                     </div>

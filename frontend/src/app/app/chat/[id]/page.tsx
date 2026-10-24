@@ -12,7 +12,6 @@ import {
   Crosshair,
   ArrowRight,
   ShieldAlert,
-  SplitSquareVertical,
   Copy,
   Check,
   RefreshCw,
@@ -21,14 +20,18 @@ import {
   Image as ImageIcon
 } from 'lucide-react';
 import { MaskViewer } from '../../../../components/MaskViewer';
-import { TideGauge } from '../../../../components/TideGauge';
 import { SitrepStream } from '../../../../components/SitrepStream';
 import { DamageTable } from '../../../../components/DamageTable';
-import { CompareSlider } from '../../../../components/CompareSlider';
 import { CitationDrawer } from '../../../../components/CitationDrawer';
 import { ChatMessage, CitationClause, DamageStats, RegionContext } from '../../../../lib/types';
-import { api } from '../../../../lib/api';
+import { api, type DamageMetrics } from '../../../../lib/api';
+import {
+  FLOODNET_SAMPLES,
+  loadFloodNetSampleImage,
+  type FloodNetSampleId,
+} from '../../../../lib/floodnet-samples';
 import { exportSitrep } from '../../../../lib/sitrep-export';
+import type { PassabilityMetrics, SafeCorridorResult } from '../../../../lib/passability';
 
 interface ChatPageProps {
   params: Promise<{ id: string }>;
@@ -47,26 +50,13 @@ const FLOODNET_CLASSES = [
   { name: 'grass', color: '#04fa07' },
 ];
 
-async function fetchSampleImage(sampleId: string): Promise<File> {
-  const response = await fetch(`/samples/${sampleId}.jpg`);
-  if (!response.ok) {
-    throw new Error(`Could not load FloodNet demo image ${sampleId} (${response.status}).`);
-  }
-
-  const image = await response.blob();
-  return new File([image], `floodnet-${sampleId}.jpg`, {
-    type: image.type || 'image/jpeg',
-  });
-}
-
-function mapDamageStats(metrics: Record<string, any>): DamageStats {
+function mapDamageStats(metrics: DamageMetrics): DamageStats {
   const summary = metrics.damage_summary || {};
   const buildings = metrics.buildings || {};
   const roads = metrics.roads || {};
   const distribution = metrics.class_pixel_distribution_pct || {};
-  const totalArea = Number(summary.total_flood_area_m2) || 0;
+  const totalAreaPixels = Number(summary.total_flood_area_px) || 0;
   const floodCoverage = Number(summary.flood_coverage_pct) || 0;
-  const estimatedSceneArea = floodCoverage > 0 ? totalArea / (floodCoverage / 100) : null;
   const severityScore = (Number(summary.damage_severity_score) || 0) / 10;
   const severityLabel = String(summary.severity_label || '').toUpperCase();
   const severityLevel =
@@ -79,7 +69,9 @@ function mapDamageStats(metrics: Record<string, any>): DamageStats {
   return {
     severity_score: severityScore,
     severity_level: severityLevel,
-    total_inundated_area_m2: totalArea,
+    total_inundated_area_m2: null,
+    total_inundated_pixels: totalAreaPixels,
+    flood_coverage_pct: floodCoverage,
     flooded_buildings_count: Number(buildings.flooded_building_count) || 0,
     safe_buildings_count: Number(buildings.non_flooded_building_count) || 0,
     flooded_roads_km: null,
@@ -87,19 +79,15 @@ function mapDamageStats(metrics: Record<string, any>): DamageStats {
     safe_roads_km: null,
     flood_depth_estimated_m: null,
     classes: FLOODNET_CLASSES.map((floodClass, id) => {
-      const percentage = Number(distribution[floodClass.name]) || 0;
+      const pixelCount = metrics.class_pixel_counts?.[floodClass.name] ??
+        Math.round(((Number(distribution[floodClass.name]) || 0) / 100) * 512 * 512);
       return {
         id,
         name: floodClass.name.replaceAll('-', ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
         color: floodClass.color,
-        pixel_count: Math.round((percentage / 100) * 512 * 512),
-        area_m2:
-          percentage === 0
-            ? 0
-            : estimatedSceneArea === null
-            ? null
-            : Math.round((percentage / 100) * estimatedSceneArea),
-        percentage,
+        pixel_count: pixelCount,
+        area_m2: null,
+        percentage: (pixelCount / (512 * 512)) * 100,
         is_flooded: [1, 3, 5, 8].includes(id),
       };
     }),
@@ -112,17 +100,18 @@ export default function ChatPage({ params }: ChatPageProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedSampleId = searchParams.get('sample_id');
+  const isFloodNetSampleId = (value: string | null | undefined): value is FloodNetSampleId =>
+    typeof value === 'string' && Object.hasOwn(FLOODNET_SAMPLES, value);
 
   const [currentThread, setCurrentThread] = useState<{
     id: string;
     title: string;
     location_tag: string;
-    severity: 'LOW' | 'MODERATE' | 'CRITICAL' | 'CATASTROPHIC';
+    severity?: 'LOW' | 'MODERATE' | 'CRITICAL' | 'CATASTROPHIC';
   }>({
     id: threadId,
-    title: 'Tactical UAV Reconnaissance Pass',
-    location_tag: 'Sector Coordinates Unconfirmed',
-    severity: 'MODERATE' as const,
+    title: 'Flood image analysis',
+    location_tag: 'Location not provided',
   });
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -136,35 +125,22 @@ export default function ChatPage({ params }: ChatPageProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [attachedRegion, setAttachedRegion] = useState<RegionContext | null>(null);
   const [activeCitation, setActiveCitation] = useState<CitationClause | null>(null);
-  const [compareMode, setCompareMode] = useState(false);
   const [activeSector, setActiveSector] = useState<'10169' | '10815' | '6423'>('10169');
   const [exportError, setExportError] = useState<string | null>(null);
   const [publishedMessageIds, setPublishedMessageIds] = useState<Set<string>>(new Set());
   const [pendingAnalysisMessage, setPendingAnalysisMessage] = useState<ChatMessage | null>(null);
   const [pendingSampleId, setPendingSampleId] = useState<'10169' | '10815' | '6423' | null>(null);
+  const [passabilityActiveMessages, setPassabilityActiveMessages] = useState<Record<string, boolean>>({});
+  const [passabilityMetricsMap, setPassabilityMetricsMap] = useState<Record<string, PassabilityMetrics>>({});
+  const [safeCorridorResults, setSafeCorridorResults] = useState<Record<string, SafeCorridorResult | null>>({});
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   const SECTOR_SCENARIOS = [
-    {
-      id: '10169',
-      name: 'Pass 10169 (Residential Inundation)',
-      image: '/samples/10169.jpg',
-      mask: '/samples/10169_mask.png',
-    },
-    {
-      id: '10815',
-      name: 'Pass 10815 (Canal Breach & Roads)',
-      image: '/samples/10815.jpg',
-      mask: '/samples/10815_mask.png',
-    },
-    {
-      id: '6423',
-      name: 'Pass 6423 (Bridge Axis & Overwash)',
-      image: '/samples/6423.jpg',
-      mask: '/samples/6423_mask.png',
-    },
+    FLOODNET_SAMPLES['10169'],
+    FLOODNET_SAMPLES['10815'],
+    FLOODNET_SAMPLES['6423'],
   ];
 
   useEffect(() => {
@@ -182,9 +158,8 @@ export default function ChatPage({ params }: ChatPageProps) {
         if (!active) return;
         if (!thread) {
           const created = await api.createChat({
-            title: 'Tactical UAV Reconnaissance Pass',
-            location_tag: 'Sector Coordinates Unconfirmed',
-            severity: 'LOW',
+            title: 'Flood image analysis',
+            location_tag: 'Location not provided',
           });
           router.replace(`/app/chat/${created.id}`);
           return;
@@ -192,15 +167,13 @@ export default function ChatPage({ params }: ChatPageProps) {
         setCurrentThread({
           id: thread.id,
           title: thread.title,
-          location_tag: thread.location_tag || 'Sector Coordinates Unconfirmed',
-          severity: thread.severity || 'LOW',
+          location_tag: thread.location_tag || 'Location not provided',
+          severity: thread.severity,
         });
         setMessages(savedMessages);
         if (
           savedMessages.length === 0 &&
-          (requestedSampleId === '10169' ||
-            requestedSampleId === '10815' ||
-            requestedSampleId === '6423')
+          isFloodNetSampleId(requestedSampleId)
         ) {
           setPendingSampleId(requestedSampleId);
           return;
@@ -209,25 +182,38 @@ export default function ChatPage({ params }: ChatPageProps) {
         const lastUserMessage = [...savedMessages]
           .reverse()
           .find((message) => message.role === 'user');
-        if (lastUserMessage && lastMessage?.id === lastUserMessage.id) {
+        if (lastUserMessage) {
           const sampleMatch = lastUserMessage.raw_image_url?.match(/\/samples\/(10169|10815|6423)\./);
           if (sampleMatch) setActiveSector(sampleMatch[1] as '10169' | '10815' | '6423');
 
+          let restoredFile: File | undefined;
           if (lastUserMessage.raw_image_storage_path) {
-            const restoredFile = await api.downloadChatImage(lastUserMessage.raw_image_storage_path);
-            if (!active) return;
+            restoredFile = await api.downloadChatImage(lastUserMessage.raw_image_storage_path);
+          } else if (sampleMatch) {
+            restoredFile = await loadFloodNetSampleImage(sampleMatch[1] as FloodNetSampleId);
+          }
+          if (!active) return;
+
+          const hydratedLastUserMessage = restoredFile
+            ? { ...lastUserMessage, image_file: restoredFile }
+            : lastUserMessage;
+          if (restoredFile) {
             setMessages((previous) =>
               previous.map((message) =>
                 message.id === lastUserMessage.id
-                  ? { ...message, image_file: restoredFile }
+                  ? hydratedLastUserMessage
                   : message,
               ),
             );
-            setSelectedFile(restoredFile);
-            setSelectedImage(lastUserMessage.raw_image_url || null);
-            setSelectedFileName(restoredFile.name);
           }
-          setPendingAnalysisMessage(lastUserMessage);
+          if (lastMessage?.id === lastUserMessage.id) {
+            if (restoredFile) {
+              setSelectedFile(restoredFile);
+              setSelectedImage(lastUserMessage.raw_image_url || null);
+              setSelectedFileName(restoredFile.name);
+            }
+            setPendingAnalysisMessage(hydratedLastUserMessage);
+          }
         }
       } catch (error) {
         if (active) {
@@ -283,13 +269,13 @@ export default function ChatPage({ params }: ChatPageProps) {
     setSelectedImage(null);
     setSelectedFile(null);
     setSelectedFileName(null);
-    void submitPrompt(`Analyze FloodNet sample ${sec.id}: ${sec.name}`, null, secId);
+    void submitPrompt(`Analyze ${sec.title}`, null, secId);
   };
 
   const submitPrompt = async (
     customText?: string,
     imageFile: File | null = selectedFile,
-    sampleId: string = activeSector,
+    sampleId?: string,
     imagePreview: string | null = selectedImage,
     existingUserMessage?: ChatMessage,
   ) => {
@@ -297,14 +283,43 @@ export default function ChatPage({ params }: ChatPageProps) {
     if (!textToSend.trim() && !imagePreview) return;
     setValidationError(null);
 
+    const previousImageMessage = [...messages]
+      .reverse()
+      .find((message) =>
+        message.role === 'user' &&
+        (message.image_file || message.raw_image_storage_path || message.raw_image_url),
+      );
+    const sourceImageFile = imageFile || (!sampleId ? previousImageMessage?.image_file : null);
+    const sourceImageUrl =
+      imagePreview ||
+      (sampleId
+        ? SECTOR_SCENARIOS.find((sector) => sector.id === sampleId)?.image
+        : previousImageMessage?.raw_image_url);
+    const sourceSampleMatch = sourceImageUrl?.match(/\/samples\/(10169|10815|6423)\./);
+    const sourceSampleId = isFloodNetSampleId(sampleId)
+      ? sampleId
+      : sourceSampleMatch && isFloodNetSampleId(sourceSampleMatch[1])
+        ? sourceSampleMatch[1]
+        : undefined;
+    const analysisImage = sourceImageFile ||
+      (sourceSampleId ? await loadFloodNetSampleImage(sourceSampleId) : undefined);
+    if (!analysisImage) {
+      setValidationError('Upload an image or choose a sample before starting image analysis.');
+      return;
+    }
+
     const userMsg: ChatMessage = existingUserMessage
-      ? { ...existingUserMessage, image_file: imageFile || undefined }
+      ? { ...existingUserMessage, image_file: analysisImage }
       : {
           id: `msg-${Date.now()}`,
           thread_id: threadId,
           role: 'user',
           content: textToSend || 'Initiating automated UAV sensor pass analysis.',
-          raw_image_url: imagePreview || SECTOR_SCENARIOS.find((sector) => sector.id === sampleId)?.image,
+          raw_image_url: imageFile
+            ? imagePreview || sourceImageUrl
+            : !sampleId
+              ? previousImageMessage?.raw_image_storage_path || sourceImageUrl || undefined
+              : sourceImageUrl || undefined,
           image_file: imageFile || undefined,
           region_context: attachedRegion || undefined,
           created_at: new Date().toISOString(),
@@ -323,18 +338,18 @@ export default function ChatPage({ params }: ChatPageProps) {
         : await api.saveChatMessage(userMsg);
       const displayUserMessage = {
         ...savedUserMessage,
-        image_file: userMsg.image_file,
+        image_file: analysisImage,
       };
       setMessages((previous) =>
         existingUserMessage
           ? previous.map((message) => message.id === userMsg.id ? displayUserMessage : message)
           : [...previous, displayUserMessage],
       );
-      const analysisImage = imageFile || await fetchSampleImage(sampleId);
       const analysis = await api.analyze({
         image: analysisImage,
         model: 'segformer',
         use_recommended: false,
+        question: textToSend.trim() || undefined,
       });
       const citations: CitationClause[] = (analysis.retrieved_protocols || []).map((item) => ({
         id: item.citation_tag.replace(/^\[+|\]+$/g, ''),
@@ -373,11 +388,11 @@ export default function ChatPage({ params }: ChatPageProps) {
     void submitPrompt(
       pending.content,
       selectedFile,
-      activeSector,
+      undefined,
       pending.raw_image_url || null,
       pending,
     );
-  }, [pendingAnalysisMessage, selectedFile, activeSector]);
+  }, [pendingAnalysisMessage, selectedFile]);
 
   useEffect(() => {
     if (!pendingSampleId) return;
@@ -385,7 +400,7 @@ export default function ChatPage({ params }: ChatPageProps) {
     if (!sample) return;
     setPendingSampleId(null);
     setActiveSector(pendingSampleId);
-    void submitPrompt(`Analyze FloodNet sample ${sample.id}: ${sample.name}`, null, sample.id, null);
+    void submitPrompt(`Analyze ${sample.title}`, null, sample.id, null);
   }, [pendingSampleId]);
 
   const handleSendMessage = async (e?: React.FormEvent) => {
@@ -444,8 +459,9 @@ export default function ChatPage({ params }: ChatPageProps) {
       void submitPrompt(
         lastUserMsg.content,
         lastUserMsg.image_file || null,
-        activeSector,
+        undefined,
         lastUserMsg.raw_image_url || null,
+        lastUserMsg,
       );
     }
   };
@@ -481,15 +497,6 @@ export default function ChatPage({ params }: ChatPageProps) {
           <span className="text-slate-500 text-[11px] hidden md:inline-block truncate">
             {currentThread.location_tag}
           </span>
-          <span
-            className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
-              currentThread.severity === 'CRITICAL'
-                ? 'bg-red-50 text-red-700 border border-red-200'
-                : 'bg-cyan-50 text-cyan-800 border border-cyan-200'
-            }`}
-          >
-            {currentThread.severity}
-          </span>
         </div>
 
         <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
@@ -500,18 +507,6 @@ export default function ChatPage({ params }: ChatPageProps) {
             <Activity className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">3D Twin</span>
           </Link>
-
-          <button
-            onClick={() => setCompareMode(!compareMode)}
-            className={`flex items-center space-x-1.5 px-2.5 py-1 border rounded-lg text-[11px] transition-colors ${
-              compareMode
-                ? 'bg-cyan-600 text-white font-medium border-cyan-600'
-                : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
-            }`}
-          >
-            <SplitSquareVertical className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">{compareMode ? 'Exit Compare' : 'Compare Timeline'}</span>
-          </button>
 
           <button
             onClick={() => {
@@ -535,7 +530,7 @@ export default function ChatPage({ params }: ChatPageProps) {
           {SECTOR_SCENARIOS.map((sec) => (
             <button
               key={sec.id}
-              onClick={() => handleSelectSector(sec.id as any)}
+              onClick={() => handleSelectSector(sec.id)}
               className={`px-3 py-1 text-[11px] rounded-lg transition-all flex items-center space-x-1.5 shrink-0 cursor-pointer border ${
                 activeSector === sec.id
                   ? 'bg-white border-cyan-500 text-cyan-900 font-semibold shadow-2xs'
@@ -547,7 +542,7 @@ export default function ChatPage({ params }: ChatPageProps) {
                   activeSector === sec.id ? 'bg-cyan-600' : 'bg-slate-400'
                 }`}
               />
-              <span>{sec.name}</span>
+              <span>{sec.title}</span>
             </button>
           ))}
         </div>
@@ -555,20 +550,6 @@ export default function ChatPage({ params }: ChatPageProps) {
           <span>10-Class Semantic Segmentation Active</span>
         </div>
       </div>
-
-      {/* ────────────────── COMPARE TIMELINE DRAWER ────────────────── */}
-      {compareMode && (
-        <div className="relative z-10 p-4 bg-slate-50 border-b border-slate-200">
-          <CompareSlider
-            beforeImage="https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=1200&q=80"
-            afterImage="https://images.unsplash.com/photo-1547683905-f686c993aae5?auto=format&fit=crop&w=1200&q=80"
-            beforeDate="18 Oct 2026, 09:00 IST (Pass 1)"
-            afterDate="19 Oct 2026, 15:30 IST (Pass 2)"
-            beforeInundatedM2={34400}
-            afterInundatedM2={48620}
-          />
-        </div>
-      )}
 
       {exportError && (
         <div role="alert" className="mx-4 mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 sm:mx-8">
@@ -579,8 +560,16 @@ export default function ChatPage({ params }: ChatPageProps) {
 
       {/* ────────────────── MESSAGE STREAM ────────────────── */}
       <div className="relative z-10 flex-1 overflow-y-auto px-4 sm:px-8 py-6 space-y-8 bg-white">
-        {messages.map((msg) => (
-          <div key={msg.id} className="max-w-6xl mx-auto space-y-4">
+        {messages.map((msg) => {
+          const sourceImageMessage = msg.role === 'assistant'
+            ? [...messages].reverse().find((message) =>
+                message.role === 'user' &&
+                (message.raw_image_storage_path === msg.raw_image_url ||
+                  message.raw_image_url === msg.raw_image_url),
+              )
+            : undefined;
+          return (
+            <div key={msg.id} className="max-w-6xl mx-auto space-y-4">
             {/* User Message */}
             {msg.role === 'user' && (
               <div className="flex flex-col items-end space-y-1.5">
@@ -626,35 +615,46 @@ export default function ChatPage({ params }: ChatPageProps) {
             {msg.role === 'assistant' && (
               <div className="space-y-5 pt-1">
                 <div className="grid grid-cols-1 gap-6 items-start">
-                  {/* Left: Imagery with Tide Gauge */}
+                  {/* Segmentation result */}
                   {msg.raw_image_url && (
-                    <div className="flex space-x-3 items-stretch">
-                      {msg.damage_stats && (
-                        <div className="shrink-0 pt-1">
-                          <TideGauge
-                            score={msg.damage_stats.severity_score}
-                            level={msg.damage_stats.severity_level}
-                            height={340}
-                          />
-                        </div>
-                      )}
-
-                      <div className="flex-1 rounded-xl overflow-hidden border border-slate-200 shadow-xs">
-                        <MaskViewer
-                          rawImageUrl={msg.raw_image_url}
-                          maskImageUrl={msg.mask_image_url}
-                          sampleId={activeSector}
-                          imageFile={msg.image_file}
-                          classes={msg.damage_stats?.classes || []}
-                          onError={setValidationError}
-                          onRegionSelect={(region) => {
-                            setAttachedRegion(region);
+                    <div className="rounded-xl overflow-hidden border border-slate-200 shadow-xs">
+                      <MaskViewer
+                        rawImageUrl={msg.raw_image_url}
+                        maskImageUrl={msg.mask_image_url}
+                        sampleId={activeSector}
+                        imageFile={msg.image_file || sourceImageMessage?.image_file}
+                        classes={msg.damage_stats?.classes || []}
+                        showPassability={passabilityActiveMessages[msg.id] ?? false}
+                        onPassabilityChange={(metrics) => {
+                          setPassabilityMetricsMap((prev) => ({ ...prev, [msg.id]: metrics }));
+                        }}
+                        safeCorridorActive={passabilityActiveMessages[msg.id] ?? false}
+                        onSafeCorridorComputed={(corridor) => {
+                          setSafeCorridorResults((prev) => ({ ...prev, [msg.id]: corridor }));
+                          if (corridor) {
+                            const bld = corridor.targetBuildingId ? `from ${corridor.targetBuildingId} ` : '';
                             setInputText(
-                              `Evaluate flood depth and structural passability at this ${region.class_name} zone.`
+                              `Evacuation corridor routed ${bld}(${corridor.lengthMeters}m to boundary): ${
+                                corridor.isIsolated ? 'Obstruction detected, pathway isolated by floodwaters.' : 'Contiguous passable route identified.'
+                              } Assess passability for high-clearance rescue vehicles.`
                             );
-                          }}
-                        />
-                      </div>
+                          }
+                        }}
+                        onDamageMetricsChange={(metrics) => {
+                          setMessages((previous) => previous.map((message) =>
+                            message.id === msg.id
+                              ? { ...message, damage_stats: mapDamageStats(metrics) }
+                              : message,
+                          ));
+                        }}
+                        onError={setValidationError}
+                        onRegionSelect={(region) => {
+                          setAttachedRegion(region);
+                          setInputText(
+                            `Evaluate flood depth and structural passability at this ${region.class_name} zone.`
+                          );
+                        }}
+                      />
                     </div>
                   )}
 
@@ -671,15 +671,25 @@ export default function ChatPage({ params }: ChatPageProps) {
                   </div>
                 </div>
 
-                {/* 10-Class Damage Distribution Table */}
+                {/* 10-Class Damage Distribution Table & Passability Analysis */}
                 {msg.damage_stats && (
                   <div className="w-full">
-                    <DamageTable stats={msg.damage_stats} />
+                    <DamageTable
+                      stats={msg.damage_stats}
+                      passabilityMetrics={passabilityMetricsMap[msg.id]}
+                      isPassabilityActive={passabilityActiveMessages[msg.id] ?? false}
+                      onAssessPassability={() => {
+                        setPassabilityActiveMessages((prev) => ({
+                          ...prev,
+                          [msg.id]: !prev[msg.id],
+                        }));
+                      }}
+                    />
                   </div>
                 )}
 
                 {/* Action Bar: Copy & Regenerate */}
-                <div className="flex items-center justify-between gap-3 pt-2 font-mono text-[11px] border-t border-slate-100">
+                <div className="flex items-center gap-3 pt-2 font-mono text-[11px] border-t border-slate-100">
                   <div className="flex items-center space-x-2">
                     <button
                       onClick={() => void handlePublishReport(msg)}
@@ -719,14 +729,12 @@ export default function ChatPage({ params }: ChatPageProps) {
                     </button>
                   </div>
 
-                  <span className="text-[11px] text-slate-500">
-                    Verified Grounded Assessment
-                  </span>
                 </div>
               </div>
             )}
-          </div>
-        ))}
+            </div>
+          );
+        })}
 
         {isProcessing && (
           <div className="max-w-6xl mx-auto space-y-3 pt-2">
@@ -747,24 +755,9 @@ export default function ChatPage({ params }: ChatPageProps) {
           {/* Quick Prompt Starter Pills */}
           <div className="flex items-center space-x-2 overflow-x-auto pb-1 text-[11px] font-mono scrollbar-none">
             <button
-              onClick={() => submitPrompt('What areas appear to be flooded in this image?')}
+              onClick={() => submitPrompt('Summarize the visible flood damage.')}
               className="px-2.5 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg flex items-center space-x-1.5 transition-colors shrink-0"
             >
-              <span className="text-cyan-600">💧</span>
-              <span>What areas are flooded?</span>
-            </button>
-            <button
-              onClick={() => submitPrompt('Which buildings appear to be affected?')}
-              className="px-2.5 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg flex items-center space-x-1.5 transition-colors shrink-0"
-            >
-              <span className="text-amber-600">🏢</span>
-              <span>Which buildings affected?</span>
-            </button>
-            <button
-              onClick={() => submitPrompt('Can you summarize the visible flood damage and evacuation route?')}
-              className="px-2.5 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg flex items-center space-x-1.5 transition-colors shrink-0"
-            >
-              <span className="text-emerald-600">📋</span>
               <span>Summarize visible damage</span>
             </button>
           </div>

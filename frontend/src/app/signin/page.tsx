@@ -36,6 +36,12 @@ export default function SignInPage() {
     }
   };
 
+  const handleContinueAsGuest = () => {
+    setErrorMessage('');
+    api.startGuestSession();
+    router.push('/app');
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col justify-center items-center px-4 py-12 relative select-none">
       {/* Main Authentication Card */}
@@ -128,6 +134,26 @@ export default function SignInPage() {
           </button>
 
         </form>
+
+        <div className="space-y-3">
+          <div className="flex items-center gap-3 text-[10px] text-slate-400">
+            <span className="h-px flex-1 bg-slate-200" />
+            <span>OR</span>
+            <span className="h-px flex-1 bg-slate-200" />
+          </div>
+          <button
+            type="button"
+            onClick={handleContinueAsGuest}
+            disabled={loading}
+            className="w-full py-2.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 font-medium rounded-lg transition-colors flex items-center justify-center space-x-2 font-sans text-sm disabled:opacity-50"
+          >
+            <span>Continue as Guest / Demo</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+          <p className="text-center text-[11px] leading-relaxed text-slate-500">
+            Demo conversations are temporary and are not saved to an account.
+          </p>
+        </div>
 
         {/* Footer Navigation */}
         <div className="text-center pt-2 border-t border-slate-100 text-xs font-sans text-slate-600">

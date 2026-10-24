@@ -200,22 +200,16 @@ export const FloodHero3D: React.FC = () => {
   }, []);
 
   if (!webglSupported) {
-    return (
-      <div className="w-full h-full flex items-center justify-center bg-slate-50 border border-slate-200 text-slate-500 font-mono text-xs">
-        Hydrological Terrain Preview (WebGL Offline)
-      </div>
-    );
+    return <div className="h-[520px] w-full bg-slate-50 lg:h-[620px]" aria-hidden="true" />;
   }
 
   return (
-    <div className="relative w-full h-[520px] lg:h-[620px] select-none">
-      <div ref={mountRef} className="w-full h-full" />
-      <div className="absolute top-4 left-4 pointer-events-none px-3 py-1 bg-white/90 border border-slate-200 rounded text-[11px] font-mono text-slate-600 shadow-sm">
-        3D Surface Model &bull; Real-Time Topography
-      </div>
-      <div className="absolute bottom-4 right-4 pointer-events-none px-3 py-1 bg-white/90 border border-slate-200 rounded text-[10px] font-mono text-slate-500 shadow-sm">
-        Drag to Orbit &bull; Natural Daylight Rendering
-      </div>
+    <div
+      className="h-[520px] w-full select-none lg:h-[620px]"
+      aria-label="3D flood terrain model"
+      role="img"
+    >
+      <div ref={mountRef} className="h-full w-full" />
     </div>
   );
 };

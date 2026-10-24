@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Download, FileText, Check } from 'lucide-react';
+import { Download, FileText } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { CitationClause } from '../lib/types';
@@ -62,14 +62,8 @@ export const SitrepStream: React.FC<SitrepStreamProps> = ({
       {/* Header bar */}
       <div className="flex items-center justify-between pb-3 border-b border-slate-200">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="w-4 h-4 rounded bg-cyan-50 border border-cyan-200 flex items-center justify-center text-cyan-700">
-            <Check className="w-3 h-3 stroke-[2.5]" />
-          </div>
           <span className="font-mono text-xs uppercase tracking-wider text-slate-900 font-semibold">
             Field SITREP Analyst
-          </span>
-          <span className="text-[10px] font-mono text-slate-500">
-            &mdash; Verified Inundation Assessment
           </span>
         </div>
 

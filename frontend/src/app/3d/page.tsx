@@ -234,7 +234,7 @@ export default function Standalone3DDigitalTwinPage() {
     { id: 6, name: 'Tree', color: '#059669', desc: 'Riparian buffer vegetation canopy', count: 'Class 6' },
     { id: 7, name: 'Vehicle', color: '#7C3AED', desc: 'Mobile assets and transit vehicles', count: 'Class 7' },
     { id: 8, name: 'Pool', color: '#06B6D4', desc: 'Engineered stormwater retention basin', count: 'Class 8' },
-    { id: 9, name: 'Grass', color: '#4ADE80', desc: 'Pervious turf and drainage swales', count: 'Class 9' },
+    { id: 9, name: 'Grass -> Water', color: '#0284C7', desc: 'Grass pixels are merged into the Water class in inference', count: 'Class 9' },
   ];
 
   // SVG Hypsometric Curve Geometry Calculations

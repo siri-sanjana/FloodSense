@@ -1,0 +1,98 @@
+\begin{thebibliography}{10}
+
+\bibitem{otsu1979threshold}
+N.~Otsu, ``A threshold selection method from gray-level histograms,'' {\em IEEE
+  Transactions on Systems, Man, and Cybernetics}, vol.~9, no.~1, pp.~62--66,
+  1979.
+
+\bibitem{xie2021segformer}
+E.~Xie, W.~Wang, Z.~Yu, A.~Anandkumar, J.~M. Alvarez, and P.~Luo, ``Segformer:
+  Simple and efficient design for semantic segmentation with transformers,''
+  {\em Advances in Neural Information Processing Systems (NeurIPS)}, vol.~34,
+  pp.~12077--12090, 2021.
+
+\bibitem{kirillov2023segment}
+A.~Kirillov, E.~Mintun, N.~Ravi, H.~Mao, C.~Rolland, L.~Gustafson, T.~Xiao,
+  S.~Whitehead, A.~C. Berg, W.-Y. Lo, {\em et~al.}, ``Segment anything,'' in
+  {\em Proceedings of the IEEE/CVF International Conference on Computer Vision
+  (ICCV)}, pp.~4015--4026, 2023.
+
+\bibitem{ravi2024sam2}
+N.~Ravi, V.~Gabeur, Y.-T. Hu, R.~Hu, C.~Ryali, T.~Ma, H.~Khedr, R.~R{\"a}dle,
+  C.~Rolland, L.~Gustafson, {\em et~al.}, ``Sam 2: Segment anything in images
+  and videos,'' {\em arXiv preprint arXiv:2408.00714}, 2024.
+
+\bibitem{liu2023grounding}
+S.~Liu, Z.~Zeng, T.~Ren, F.~Li, H.~Zhang, J.~Yang, C.~Li, J.~Yang, H.~Su,
+  J.~Zhu, {\em et~al.}, ``Grounding dino: Marrying dino with grounded
+  pre-training for open-set object detection,'' in {\em European Conference on
+  Computer Vision (ECCV)}, 2024.
+
+\bibitem{disasteller2026}
+Z.~Chen, E.~Asadi~Shamsabadi, S.~Jiang, L.~Shen, and D.~Dias-da Costa,
+  ``Integration of large vision language models for efficient post-disaster
+  damage assessment and reporting,'' {\em Nature Communications}, vol.~17,
+  no.~1, p.~1481, 2026.
+
+\bibitem{masa_blip2026}
+I.~Aydin, E.~G{\"u}{\c{c}}l{\"u}, T.~K. {\c{S}}ener, and E.~Akin, ``Explainable
+  flood damage assessment using multi-atrous self-attention and vision-language
+  integration,'' {\em Artificial Intelligence in Geosciences}, p.~100192, 2026.
+
+\bibitem{llmark2025}
+K.~Wu, S.~Wang, J.~Gao, W.~Liu, Q.~Liu, C.~Cai, and Y.~Yang, ``Llmark:
+  Instance-aware foundation model for flood risk assessment,'' {\em Information
+  Fusion}, p.~104440, 2026.
+
+\bibitem{disasterm3_2025}
+J.~Wang, W.~Xuan, H.~Qi, Z.~Liu, K.~Liu, Y.~Wu, H.~Chen, J.~Song, J.~Xia,
+  Z.~Zheng, and N.~Yokoya, ``Disasterm3: A remote sensing vision-language
+  dataset for disaster damage assessment and response,'' {\em Advances in
+  Neural Information Processing Systems (NeurIPS)}, vol.~38, 2026.
+
+\bibitem{lewis2020retrieval}
+P.~Lewis, E.~Perez, A.~Piktus, F.~Petroni, V.~Karpukhin, N.~Goyal,
+  H.~K{\"u}ttler, M.~Lewis, W.-t. Yih, T.~Rockt{\"a}schel, {\em et~al.},
+  ``Retrieval-augmented generation for knowledge-intensive nlp tasks,'' {\em
+  Advances in Neural Information Processing Systems (NeurIPS)}, vol.~33,
+  pp.~9459--9474, 2020.
+
+\bibitem{crisisense2025}
+Y.~Xiao, K.~Yin, and A.~Mostafavi, ``Crisisense-rag: Crisis sensing multimodal
+  retrieval-augmented generation for rapid disaster impact assessment,'' {\em
+  Computer-Aided Civil and Infrastructure Engineering}, p.~100096, 2026.
+
+\bibitem{trainingfree_rag2025}
+L.~Huang, K.~Yin, C.~F. Liu, and A.~Mostafavi, ``Training-free
+  retrieval-augmented generation with reinforced reasoning for flood damage
+  nowcasting,'' {\em Computer-Aided Civil and Infrastructure Engineering},
+  p.~100077, 2026.
+
+\bibitem{rs_rag2025}
+C.~Wen, Y.~Lin, X.~Qu, N.~Li, Y.~Liao, X.~Li, and H.~Lin, ``Remote sensing
+  retrieval-augmented generation: Bridging remote sensing imagery and
+  comprehensive knowledge with a multimodal dataset and retrieval-augmented
+  generation model,'' {\em IEEE Geoscience and Remote Sensing Magazine}, 2026.
+
+\bibitem{reimers2019sentence}
+N.~Reimers and I.~Gurevych, ``Sentence-bert: Sentence embeddings using siamese
+  bert-networks,'' {\em Proceedings of the 2019 Conference on Empirical Methods
+  in Natural Language Processing (EMNLP)}, pp.~3982--3992, 2019.
+
+\bibitem{rahnemoonfar2021floodnet}
+M.~Rahnemoonfar, T.~Chowdhury, A.~Sarkar, D.~Varshney, M.~Yari, and R.~R.
+  Murphy, ``Floodnet: A high-resolution aerial imagery dataset for post-flood
+  scene understanding,'' {\em IEEE Access}, vol.~9, pp.~89644--89654, 2021.
+
+\bibitem{flood_damagesense2025}
+Y.~H. Ho and A.~Mostafavi, ``Multimodal mamba with multitask learning for
+  building flood damage assessment using synthetic aperture radar remote
+  sensing imagery,'' {\em Computer-Aided Civil and Infrastructure Engineering},
+  vol.~40, no.~26, pp.~4401--4424, 2025.
+
+\bibitem{milletari2016v}
+F.~Milletari, N.~Navab, and S.-A. Ahmadi, ``V-net: Fully convolutional neural
+  networks for volumetric medical image segmentation,'' in {\em Proceedings of
+  the International Conference on 3D Vision (3DV)}, pp.~565--571, 2016.
+
+\end{thebibliography}

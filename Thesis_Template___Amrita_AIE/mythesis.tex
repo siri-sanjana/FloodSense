@@ -1,0 +1,303 @@
+% AMRITA VISHWA VIDYAPEETHAM B.TECH THESIS TEMPLATE
+% DEPARTMENT OF ARTIFICIAL INTELLIGENCE - COIMBATORE CAMPUS
+
+\documentclass[a4paper, 12pt]{report}
+\usepackage[margin=1.0in]{geometry}
+
+\usepackage{bold-extra}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage[english]{babel}
+\usepackage[autostyle, english=american]{csquotes}
+\MakeOuterQuote{"}
+\usepackage{setspace}
+\onehalfspacing
+\graphicspath{{images/}}
+\usepackage{amsthm}
+\usepackage{array}
+\usepackage{cite}
+\usepackage{longtable}
+\usepackage{booktabs}
+\usepackage{float}
+%\usepackage{fancyhdr}
+%\usepackage{titletoc}
+\usepackage{url}
+\usepackage[hidelinks]{hyperref}
+\theoremstyle{definition}
+\newtheorem{Definition}{Definition}[section]
+
+%-------------------------------------------------------------
+% Title Page
+%-------------------------------------------------------------
+\begin{document}
+	\pagenumbering{gobble}
+	\thispagestyle{empty}
+	\begin{large}
+		\begin{center}
+			{\Large\bfseries{FLOODSENSE: A MULTI-MODEL FRAMEWORK WITH RAG-LLM SYSTEM FOR AUTOMATED FLOOD REPORTING}}\\
+			\vspace{1.2cm}
+			A Thesis \\
+			\vspace{.15cm}
+			Submitted in partial fulfilment for the Degree of\\
+			\vspace{.15cm}
+			BACHELOR OF TECHNOLOGY\\
+			\vspace{.15cm}
+            in \\
+            \vspace{.15cm}
+            COMPUTER SCIENCE AND ENGINEERING (ARTIFICIAL INTELLIGENCE) \\
+			\vspace{0.8cm}
+			by\\ 
+			\vspace{.25cm}
+			{\large\bfseries{VARSHITHA THILAK KUMAR \quad (CB.SC.U4AIE23258)}} \\ 
+            {\large\bfseries{SIRI SANJANA S \quad (CB.SC.U4AIE23249)}} \\
+            {\large\bfseries{SHREYA ARUN \quad (CB.SC.U4AIE23253)}} \\
+            {\large\bfseries{ANAGHA MENON \quad (CB.SC.U4AIE23212)}} \\
+            \vspace{1.6cm}
+			
+			\includegraphics[width=4.0cm,keepaspectratio]{univA.png}\\
+			\vfill
+			DEPARTMENT OF ARTIFICIAL INTELLIGENCE\\
+			\Large{\textbf{AMRITA VISHWA VIDYAPEETHAM}}\\
+			{\large COIMBATORE CAMPUS (INDIA)}\\
+			\vspace*{.3cm}
+			October 2026
+		\end{center}
+	\end{large}
+
+	%------------------------------------------------------------------------------------
+	% Bonafide Certificate
+	%------------------------------------------------------------------------------------
+	\newpage
+	\begin{center}
+		{\large DEPARTMENT OF ARTIFICIAL INTELLIGENCE}\\
+		\Large{ \textbf{AMRITA VISHWA VIDYAPEETHAM}}\\
+		{\large COIMBATORE CAMPUS}\\
+		\vspace*{1.2cm}
+		\includegraphics[width=3.5cm,keepaspectratio]{univA.png}\\
+		\vspace*{1.0cm}
+		{\Large \textbf{BONAFIDE CERTIFICATE}}
+	\end{center}
+	\vspace*{.6cm}
+	\noindent This is to certify that the thesis entitled \enquote{\textbf{FloodSense: A Multi-Model Framework with RAG-LLM System for Automated Flood Reporting}} submitted by \textbf{Varshitha Thilak Kumar (CB.SC.U4AIE23258)}, \textbf{Siri Sanjana S (CB.SC.U4AIE23249)}, \textbf{Shreya Arun (CB.SC.U4AIE23253)}, and \textbf{Anagha Menon (CB.SC.U4AIE23212)} for the award of the \textbf{Degree of Bachelor of Technology} in \textbf{Computer Science and Engineering (Artificial Intelligence)} under the \textbf{Faculty of Engineering} is a bonafide record of the research work carried out by them under my guidance and supervision in the Department of Artificial Intelligence, Amrita Vishwa Vidyapeetham, Coimbatore Campus.\\
+
+    \vfill
+    \noindent Submitted for the examination held on \dotfill
+    \vfill
+    \noindent \textbf{INTERNAL EXAMINER} \hfill \textbf{EXTERNAL EXAMINER}
+    \vfill
+    \begin{center}
+		\textbf{Dr. Mithun Kumar Kar}\\
+		Thesis Advisor,\\
+		Assistant Professor,\\
+		Department of Artificial Intelligence,\\
+		Amrita Vishwa Vidyapeetham, Coimbatore Campus,\\
+		India.
+    \end{center}
+
+	%-------------------------------------------------------------------------------
+	% Declaration Page
+	%-------------------------------------------------------------------------------
+	\newpage
+	\begin{center}
+		{\large DEPARTMENT OF ARTIFICIAL INTELLIGENCE}\\
+		\Large{ \textbf{AMRITA VISHWA VIDYAPEETHAM}}\\
+		{\large COIMBATORE CAMPUS}\\
+		\vspace*{1.5cm}
+		\large {\textbf{DECLARATION}}
+		\vspace*{.3cm}
+	\end{center}
+	
+	\noindent We, \textbf{Varshitha Thilak Kumar (CB.SC.U4AIE23258)}, \textbf{Siri Sanjana S (CB.SC.U4AIE23249)}, \textbf{Shreya Arun (CB.SC.U4AIE23253)}, and \textbf{Anagha Menon (CB.SC.U4AIE23212)}, hereby declare that this thesis entitled \enquote{\textbf{FloodSense: A Multi-Model Framework with RAG-LLM System for Automated Flood Reporting}} is an authentic record of the original work done by us under the guidance of \textbf{Dr. Mithun Kumar Kar}, Assistant Professor, Department of Artificial Intelligence, Amrita Vishwa Vidyapeetham, Coimbatore Campus. To the best of our knowledge, this work has not formed the basis for the award of any degree, diploma, associateship, fellowship, or similar title to any candidate in any University or Institution.\\
+
+	\vspace*{1cm}
+	\noindent{\bf Place: Coimbatore\hfill Signatures of the Students:} \\
+	\noindent {\bf Date: 24 October 2026}
+	\vspace{1.2cm}
+	
+	\begin{flushright}
+		1. \underline{\hspace{4.5cm}}\\
+		2. \underline{\hspace{4.5cm}}\\
+		3. \underline{\hspace{4.5cm}}\\
+		4. \underline{\hspace{4.5cm}}\\
+	\end{flushright}
+	
+	\vfill
+	\begin{center}
+		\large{COUNTERSIGNED}\\
+	\end{center}
+	\vspace{0.3in}
+	
+    \begin{center}
+		\textbf{Dr. K. P. Soman}\\
+		Professor and Dean, \\ 
+		Department of Artificial Intelligence, \\
+		Amrita Vishwa Vidyapeetham, Coimbatore Campus,\\
+		India.
+    \end{center}
+	
+	%-----------------------------------------------------------------------------
+	% Front Matter
+	%-----------------------------------------------------------------------------
+	\clearpage
+	\pagenumbering{roman}
+	
+	\chapter*{Acknowledgements}
+	\addcontentsline{toc}{chapter}{Acknowledgements}	
+	We express our humble salutations and profound gratitude to our beloved Chancellor, \textbf{Sri Mata Amritanandamayi Devi (AMMA)}, whose grace, boundless inspiration, and vision for science and society have been our guiding light throughout this endeavor.
+
+	We extend our heartfelt gratitude to \textbf{Dr. K. P. Soman}, Professor and Dean, Department of Artificial Intelligence, for providing world-class computational infrastructure, fostering a culture of rigorous scientific inquiry, and rendering constant support throughout our academic tenure.
+
+	We are deeply indebted to our supervisor and thesis advisor, \textbf{Dr. Mithun Kumar Kar}, Assistant Professor, Department of Artificial Intelligence, for his scholarly guidance, insightful discussions, constructive critiques, and continuous encouragement across all phases of the FloodSense project.
+
+	We also thank the faculty members, technical laboratory coordinators, and research scholars of the Department of Artificial Intelligence for their assistance and academic camaraderie. 
+
+	Finally, we extend our heartfelt appreciation to our parents, family members, and peers for their unyielding encouragement, patience, and moral support throughout this journey.
+	
+	\vspace{1.2cm}
+	\begin{flushright}
+		\textbf{VARSHITHA THILAK KUMAR}\\
+		\textbf{SIRI SANJANA S}\\
+		\textbf{SHREYA ARUN}\\
+		\textbf{ANAGHA MENON}
+	\end{flushright}
+
+	\tableofcontents
+	\listoffigures
+	\addcontentsline{toc}{chapter}{List of Figures}
+	\listoftables
+	\addcontentsline{toc}{chapter}{List of Tables}
+	
+	\newpage
+	\section*{{\huge Abbreviations}\hfill} 
+	\addcontentsline{toc}{chapter}{\textbf{Abbreviations}}
+	\vspace{0.8cm}
+	\begin{longtable}{ll}
+		\textbf{AI} & Artificial Intelligence \\
+		\textbf{AIE} & Artificial Intelligence and Engineering \\
+		\textbf{AMP} & Automatic Mixed Precision \\
+		\textbf{B.Tech} & Bachelor of Technology \\
+		\textbf{CE} & Cross Entropy \\
+		\textbf{ChromaDB} & Open-Source Vector Embedding Database \\
+		\textbf{CNN} & Convolutional Neural Network \\
+		\textbf{CV} & Computer Vision \\
+		\textbf{FEMA} & Federal Emergency Management Agency (USA) \\
+		\textbf{FP32} & Single Precision 32-bit Floating Point \\
+		\textbf{GIS} & Geographic Information System \\
+		\textbf{GPU} & Graphics Processing Unit \\
+		\textbf{GSD} & Ground Sample Distance \\
+		\textbf{HSV} & Hue, Saturation, Value Color Space \\
+		\textbf{IoU} & Intersection over Union (Jaccard Index) \\
+		\textbf{LLM} & Large Language Model \\
+		\textbf{mIoU} & Mean Intersection over Union \\
+		\textbf{MRR} & Mean Reciprocal Rank \\
+		\textbf{NDMA} & National Disaster Management Authority (India) \\
+		\textbf{NDRF} & National Disaster Response Force (India) \\
+		\textbf{RAG} & Retrieval-Augmented Generation \\
+		\textbf{SAM} & Segment Anything Model \\
+		\textbf{SAM2} & Segment Anything Model Version 2 \\
+		\textbf{SAR} & Synthetic Aperture Radar \\
+		\textbf{SITREP} & Situation Report \\
+		\textbf{SOTA} & State-of-the-Art \\
+		\textbf{TTA} & Test-Time Augmentation \\
+		\textbf{UAV} & Unmanned Aerial Vehicle (Drone) \\
+		\textbf{VLM} & Vision-Language Model \\
+		\textbf{VQA} & Visual Question Answering \\
+	\end{longtable}
+
+	\newpage
+	\section*{{\huge List of Symbols}\hfill} 
+	\addcontentsline{toc}{chapter}{\textbf{List of Symbols}}
+	\vspace{0.8cm}
+	\begin{longtable}{ll}
+		$\mathcal{I}$ & Input aerial RGB image tensor $\in \mathbb{R}^{3 \times H \times W}$ \\
+		$\mathcal{Y}$ & Ground truth segmentation mask tensor $\in \{0, \dots, C-1\}^{H \times W}$ \\
+		$\hat{\mathcal{Y}}$ & Predicted semantic segmentation label map \\
+		$C$ & Number of semantic classes ($C=10$ for FloodNet) \\
+		$p_{i,c}$ & Predicted softmax probability of pixel $i$ belonging to class $c$ \\
+		$\mathcal{L}_{CE}$ & Categorical Cross-Entropy loss function \\
+		$\mathcal{L}_{Focal}$ & Multi-class Focal loss for focusing on hard spatial minority pixels \\
+		$\mathcal{L}_{Dice}$ & Multi-class soft Dice loss for direct region overlap optimization \\
+		$\mathcal{L}_{DiceFocal}$ & Combined DiceFocalLoss objective ($w_{focal} \mathcal{L}_{Focal} + w_{dice} \mathcal{L}_{Dice}$) \\
+		$\gamma$ & Focusing parameter in Focal Loss ($\gamma = 2.0$) \\
+		$\alpha$ & Balance hyperparameter in Focal Loss ($\alpha = 0.25$) \\
+		$w_i$ & Class-balanced sampling weight for image $i$ based on inverse class frequency \\
+		$w_c$ & Inverse class weight for semantic class $c$ in Focal Loss \\
+		$\kappa$ & Maximum class weight ceiling cap ($\kappa = 3.0$) \\
+		$J(c)$ & Jaccard Index (IoU) of class $c$ \\
+		$w(x, y)$ & 2D Gaussian spatial feathering weight at coordinate $(x, y)$ \\
+		$\sigma$ & Gaussian spatial dispersion coefficient for patch window feathering \\
+		$M_{conf}$ & Pixel-level confusion matrix $\in \mathbb{Z}_{\ge 0}^{C \times C}$ \\
+		$TP_c, FP_c, FN_c$ & True positives, false positives, and false negatives for class $c$ \\
+		$F_1^{(c)}$ & Dice coefficient / Harmonic mean of precision and recall for class $c$ \\
+		$S_{severity}$ & Composite disaster severity index $\in [0, 100]$ \\
+		$\mathbf{e}_q, \mathbf{e}_d$ & Dense embedding vectors of query $q$ and document chunk $d$ \\
+		$\text{sim}(\cdot, \cdot)$ & Cosine similarity metric between dense embedding vectors \\
+	\end{longtable}
+
+	\chapter*{Abstract}
+	\addcontentsline{toc}{chapter}{Abstract}
+	Accurate, fine-grained disaster impact assessment is vital for coordinating rapid search-and-rescue, logistical routing, and life-saving resource deployment following extreme flood events. While modern Unmanned Aerial Vehicles (UAVs) capture ultra-high-resolution imagery of inundated regions within hours of a catastrophic event, two fundamental operational bottlenecks persist: (i) existing computer vision pipelines are largely confined to coarse binary water detection or produce uncalibrated segmentation masks that human operators must manually interpret under severe stress; and (ii) text-based emergency response tools generate situational reports from secondary news reports or unstructured web scraping without grounded visual evidence, introducing unacceptable latency and high risk of synthetic hallucinations.
+
+	This thesis presents \textbf{FloodSense}, an end-to-end multi-modal artificial intelligence framework that unifies high-resolution computer vision segmentation with Retrieval-Augmented Generation (RAG) and Large Language Models (LLMs) for automated post-flood disaster reporting. First, we conduct an extensive multi-paradigm benchmarking of five distinct vision architectures across the high-resolution multi-class FloodNet drone dataset: Classical Color-Space Thresholding, Segment Anything Model (SAM), Vision-Language Models (VLM), Grounding DINO + SAM2 open-set prompting, and Transformer-based SegFormer. To address the acute class imbalance and fine-scale structural features (such as narrow flooded roadways, submerged vehicles, and flooded building perimeters), we design a state-of-the-art (SOTA) segmentation pipeline combining SegFormer with \textbf{class-balanced dataset sampling}, a multi-objective \textbf{DiceFocalLoss (coupling class-weighted Focal Loss and soft Dice loss)}, overlapping \textbf{2D Gaussian-feathered sliding-window inference}, and \textbf{dihedral multi-scale Test-Time Augmentation (TTA)}. This system achieves a \textbf{Frequency-Weighted IoU of 74.27\%}, \textbf{84.49\% pixel accuracy}, and substantial IoU improvements across key infrastructure classes including Non-Flooded Roads (0.7515), Non-Flooded Buildings (0.7434), Trees (0.7203), and Grasslands (0.8455).
+
+	Second, a deterministic damage extraction engine translates raw pixel masks into structured physical disaster metrics, including flooded building counts, submerged road percentages, and stranded vehicle counts. These metrics dynamically construct multi-faceted queries into a vector-indexed knowledge repository comprising statutory disaster management guidelines from the National Disaster Management Authority (NDMA), Federal Emergency Management Agency (FEMA), and historical flood response records. The RAG pipeline demonstrates exceptional retrieval fidelity, attaining a \textbf{Mean Reciprocal Rank (MRR) of 0.95}, \textbf{Precision@1 of 0.90}, and \textbf{Recall@3 of 1.00}. Finally, an LLM synthesis engine generates grounded, citation-traceable disaster Situation Reports (SITREPs) exported automatically in JSON, Markdown, DOCX, and PDF formats, backed by a production-ready web dashboard deployed on Microsoft Azure Container Apps. FloodSense bridges the critical chasm between raw aerial computer vision and accountable emergency disaster decision-making.
+
+	\clearpage
+	\pagenumbering{arabic}
+	\setcounter{page}{1}
+
+	%-----------------------------------------------------------------------------
+	% Chapters
+	%-----------------------------------------------------------------------------
+	\chapter{Introduction}
+	\input{chapters/introduction}
+
+	\chapter{Literature Survey}
+	\input{chapters/chapter2}
+
+	\chapter{Problem Formulation and System Architecture}
+	\input{chapters/chapter3}
+
+	\chapter{Multi-Class Aerial Image Segmentation and Benchmarking}
+	\input{chapters/chapter4} 
+
+	\chapter{Damage Assessment, Protocol Retrieval, and Situational Intelligence}
+	\input{chapters/chapter5}
+
+	\chapter{Experimental Results, Performance Analysis, and Discussions}
+	\input{chapters/chapter6}
+
+	\chapter{Interactive Dashboard and System Deployment}
+	\input{chapters/chapter7}
+
+	\chapter{Conclusion and Scope for Further Research}
+	\input{chapters/conclusion}
+
+	\appendix
+	\chapter{Dataset Profiles, Model Configurations, and Protocols}
+	\input{chapters/appendix}
+
+	%-----------------------------------------------------------------------------
+	% References
+	%-----------------------------------------------------------------------------
+	\newpage
+	\renewcommand{\bibname}{References}
+	\bibliographystyle{ieeetr}
+	\addcontentsline{toc}{chapter}{References}
+	\bibliography{mybib}
+
+	%-----------------------------------------------------------------------------
+	% List of Publications
+	%-----------------------------------------------------------------------------
+	\chapter*{List of Publications \\ \large(Based on the Research Work)}
+	\addcontentsline{toc}{chapter}{List of Publications Based on the Research Work}
+	
+	\textbf{\Large Papers Communicated / In Preparation}
+	\begin{enumerate}
+		\item \textbf{Varshitha Thilak Kumar, Siri Sanjana S, Shreya Arun, Anagha Menon, and Mithun Kumar Kar}, \enquote{FloodSense: A Multi-Model Framework with RAG-LLM System for Automated Post-Flood Disaster Damage Assessment and Situational Intelligence}, Communicated to \textit{IEEE Geoscience and Remote Sensing Letters / IEEE Access}, 2026.
+		\item \textbf{Siri Sanjana S, Varshitha Thilak Kumar, Shreya Arun, Anagha Menon, and Mithun Kumar Kar}, \enquote{Benchmarking Classical, Foundation, and Transformer Vision Paradigms with Lov\'{a}sz-Softmax Loss on High-Resolution UAV FloodNet Imagery}, In Preparation for \textit{International Conference on Machine Learning and Cybernetics (ICMLC)}, 2026.
+	\end{enumerate}
+
+\end{document}

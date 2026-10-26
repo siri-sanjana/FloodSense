@@ -1,0 +1,27 @@
+\babel@toc {english}{}\relax 
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {1.1}{\ignorespaces The Operational Disaster Intelligence Gap: Disconnect between aerial remote sensing, automated computer vision segmentation, statutory emergency protocols, and verifiable field reporting.}}{3}{figure.1.1}%
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {2.1}{\ignorespaces Evolution of Post-Disaster AI Paradigms: Historical progression from pixel-level thresholding to foundation vision models and multi-modal, protocol-grounded disaster intelligence.}}{9}{figure.2.1}%
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {3.1}{\ignorespaces End-to-End System Architecture of FloodSense: Three-tier pipeline uniting SOTA computer vision segmentation, statutory RAG protocol retrieval, and multi-format disaster SITREP reporting.}}{18}{figure.3.1}%
+\contentsline {figure}{\numberline {3.2}{\ignorespaces High-Resolution Gaussian Sliding-Window Tiling Pipeline: Preserving native ground sample distance and eliminating border stitching artifacts across large UAV orthomosaics.}}{19}{figure.3.2}%
+\contentsline {figure}{\numberline {3.3}{\ignorespaces Dynamic RAG Query Formulation and Retrieval Pipeline: Translating spatial segmentation metrics into dense semantic queries over statutory emergency response guidelines.}}{19}{figure.3.3}%
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {4.1}{\ignorespaces FloodNet Class Distribution: Demonstrating the acute spatial imbalance where critical infrastructure classes (flooded roads, vehicles) comprise less than 3\% of total imagery.}}{23}{figure.4.1}%
+\contentsline {figure}{\numberline {4.2}{\ignorespaces Class-Balanced Sampling and Multi-Objective DiceFocalLoss Mechanism: Coupling inverse square-root class-frequency sampling with focal hard-example mining and soft Dice overlap optimization.}}{26}{figure.4.2}%
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {5.1}{\ignorespaces Quantitative Damage Extraction Pipeline: Morphological connected component parsing and hazard adjacency analysis translating pixel masks into actionable physical disaster metrics.}}{30}{figure.5.1}%
+\contentsline {figure}{\numberline {5.2}{\ignorespaces Dense Vector Indexing and Semantic Retrieval: ChromaDB and Sentence-BERT pipeline transforming static statutory guidelines into high-speed searchable knowledge vectors.}}{31}{figure.5.2}%
+\contentsline {figure}{\numberline {5.3}{\ignorespaces Structure and Content Hierarchy of an Automated Disaster Situation Report (SITREP): Demonstrating deterministic metric quantification, tactical action plans, and statutory citations.}}{33}{figure.5.3}%
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {6.1}{\ignorespaces Five-Model Benchmark Performance Comparison: Highlighting trade-offs across binary IoU, multi-class mIoU, macro F1-score, pixel accuracy, and inference frame rate (FPS).}}{38}{figure.6.1}%
+\contentsline {figure}{\numberline {6.2}{\ignorespaces Training Loss Convergence and Metric Trajectory: Demonstrating smooth monotonic reduction in compound Lov\'{a}sz-Softmax loss from 0.5995 down to 0.2102.}}{39}{figure.6.2}%
+\contentsline {figure}{\numberline {6.3}{\ignorespaces Per-Class F1-Score and IoU Distribution: Demonstrating exceptional performance on key structural classes (Grass 0.85, Dry Roads 0.75, Dry Buildings 0.74, Trees 0.72, Water 0.64).}}{40}{figure.6.3}%
+\contentsline {figure}{\numberline {6.4}{\ignorespaces Qualitative Evaluation on Aerial Scene 10169: (Left to Right) Original UAV orthophoto, Ground Truth ColorMask, Standard $512 \times 512$ prediction, and Proposed SOTA High-Resolution Sliding-Window prediction. Note the sharp delineation of the swimming pool (yellow), parked vehicle (magenta), dry driveway (grey), and waterlogged field (cyan/green).}}{42}{figure.6.4}%
+\contentsline {figure}{\numberline {6.5}{\ignorespaces Qualitative Evaluation on Dense Residential Scene 10173: (Left to Right) Original UAV orthophoto, Ground Truth ColorMask, Standard $512 \times 512$ prediction, and Proposed SOTA High-Resolution Sliding-Window prediction. Notice how small vehicles in driveways and narrow street margins are crisply resolved rather than disappearing into blurred pixels.}}{42}{figure.6.5}%
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {7.1}{\ignorespaces FloodSense Deployment Topology: Decoupled client-server architecture illustrating UAV data ingestion, WSGI backend processing, vector search, and multi-format report export.}}{45}{figure.7.1}%
+\contentsline {figure}{\numberline {7.2}{\ignorespaces Interactive Web Dashboard User Interface: Intuitive layout featuring split-slider visual overlay, real-time KPI damage cards, and one-click multi-format SITREP export.}}{46}{figure.7.2}%
+\addvspace {10\p@ }
+\addvspace {10\p@ }

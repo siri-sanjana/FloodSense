@@ -92,6 +92,25 @@ PYTHONPATH=. USE_TF=0 .venv/bin/python \
   --config configs/segmentation/segformer_b3_class_balanced.json
 ```
 
+To train a DeepLabV3+ / ResNet-50 comparison model based on Chen et al.'s
+DeepLabV3+ architecture paper, use the separate full-training recipe below.
+This is an architecture reproduction on FloodNet, not a claim to reproduce
+the paper's original datasets or full training protocol. It uses the same
+official FloodNet train/validation split, 512-pixel inputs, class mapping,
+Dice/Focal objective, and validation metrics as the SegFormer experiments.
+The batch size is two because DeepLabV3+'s pooled decoder branch requires more
+than one item per batch. The checkpoint is isolated from the production model.
+
+```bash
+PYTHONPATH=. USE_TF=0 .venv/bin/python \
+  models_benchmark/06_segformer_finetune.py \
+  --config configs/segmentation/deeplabv3plus_floodnet.json
+PYTHONPATH=. USE_TF=0 .venv/bin/python \
+  models_benchmark/evaluate_segmentation_experiments.py \
+  --config configs/segmentation/compare_deeplabv3plus.json \
+  --output results/segmentation_comparison_deeplabv3plus.json
+```
+
 Promote an experimental checkpoint only if it improves validation mIoU
 meaningfully on the same fixed split; inspect per-class IoU as well, since
 class balancing can help rare classes while hurting others.
@@ -100,11 +119,30 @@ The dashboard uses `checkpoints/segformer_full/segformer_best.pt` for
 FloodNet SegFormer-B3 predictions only when the checkpoint is available and
 heavy computer vision is enabled. Set `FLOODSENSE_SEGFORMER_CHECKPOINT` to
 override its location. Without that checkpoint, it can use an ADE20K-pretrained
-SegFormer with heuristic FloodNet label mapping. When `DISABLE_HEAVY_CV=1`
-(as in the included CPU container configuration), SegFormer and SAM requests
-fall back to classical color/threshold segmentation; the API response reports
-the model actually used. No current held-out benchmark is available, so the
-backend does not publish verified mIoU or F1 scores.
+SegFormer with heuristic FloodNet label mapping.
+
+To explicitly run a fine-tuned SegFormer on a cloud backend that otherwise
+disables heavy computer vision, set
+`FLOODSENSE_ENABLE_FINETUNED_SEGFORMER=1`. For a mounted local file, set
+`FLOODSENSE_SEGFORMER_CHECKPOINT` to its path. To download a private Hugging
+Face Hub model artifact on demand, set `FLOODSENSE_SEGFORMER_REPO_ID`,
+`FLOODSENSE_SEGFORMER_REPO_FILENAME` (default `segformer_best.pt`), and
+`HF_TOKEN` as a hosting-platform secret. `FLOODSENSE_MODEL_CACHE_DIR` can
+select a persistent cache location. Set
+`FLOODSENSE_SEGFORMER_DISPLAY_NAME=Class-balanced SegFormer-B3` so
+`/api/models` and inference responses identify the intended checkpoint.
+This opt-in applies to the SegFormer segmentation path only; the cloud fallback
+for SAM and other computer-vision paths remains unchanged. If explicitly
+enabled but the checkpoint is missing or inference fails, the API returns an
+error rather than silently using classical segmentation. Keep the checkpoint
+in private model storage or a private mounted volume; `checkpoints/` is
+intentionally excluded from Git and the Docker build context.
+
+When the opt-in is off and `DISABLE_HEAVY_CV=1` (as in the included CPU
+container configuration), SegFormer and SAM requests use classical
+color/threshold segmentation; the API response reports the model actually
+used. No current held-out benchmark is available, so the backend does not
+publish verified mIoU or F1 scores.
 
 The dashboard also produces a relative monocular depth map using
 `depth-anything/Depth-Anything-V2-Small-hf`. The model is downloaded on first
@@ -121,7 +159,10 @@ The Flask backend exposes independent model endpoints for an existing client UI:
 - `POST /api/segment` — multipart form with `image=<file>` or `sample_id=<id>`;
   optional `model=segformer|classical|sam`. Returns model/timing/metrics and
   URLs for the class-ID PNG, binary flood PNG, and colored overlay. Class-ID
-  pixels are values `0`-`9`; binary flood pixels are `0` or `255`.
+  pixels are values `0`-`9`; binary flood pixels are `0` or `255`. In inference,
+  every class-9 Grass pixel is reclassified to class-5 Water before masks and
+  flood metrics are generated. This intentionally treats vegetation as water
+  and can overstate inundation; the API response identifies this remapping.
 - `POST /api/depth` — multipart form with `image=<file>` or `sample_id=<id>`.
   Returns a relative-depth visualization URL and inference timing. This is not
   metric distance or flood-water depth.

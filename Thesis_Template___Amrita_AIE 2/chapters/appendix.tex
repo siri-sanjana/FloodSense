@@ -1,0 +1,130 @@
+\label{chap:appendix}
+
+\section{FloodNet Semantic Annotation Protocol and Palette Specifications}
+Table~\ref{tab:appendix_class_specs} details the official annotation definitions and RGB color specifications utilized in the FloodNet UAV disaster benchmark.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Detailed FloodNet Annotation Specifications and RGB Color Keys.}
+\label{tab:appendix_class_specs}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{c l c c p{6.5cm}}
+\toprule
+\textbf{ID} & \textbf{Class Name} & \textbf{RGB Tuple} & \textbf{Hex Code} & \textbf{Annotation Criteria} \\
+\midrule
+0 & Background & $(0, 0, 0)$ & \texttt{\#000000} & Non-relevant areas, horizon, sky, and untagged terrain. \\
+1 & Building-Flooded & $(255, 0, 0)$ & \texttt{\#FF0000} & Dwellings with water touching the foundation, perimeter, or roof. \\
+2 & Building-Non-Flooded & $(180, 120, 120)$ & \texttt{\#B47878} & Habitable dwellings with completely dry surrounding ground. \\
+3 & Road-Flooded & $(160, 150, 20)$ & \texttt{\#A09614} & Asphalt/concrete roads covered by standing or flowing floodwater. \\
+4 & Road-Non-Flooded & $(140, 140, 140)$ & \texttt{\#8C8C8C} & Dry roadways, paved lanes, and driveways passable to vehicles. \\
+5 & Water & $(61, 230, 250)$ & \texttt{\#3DE6FA} & Rivers, canals, retention ponds, reservoirs, and open flood inundation. \\
+6 & Tree & $(0, 82, 255)$ & \texttt{\#0052FF} & Tree canopies, dense foliage, and forest stands. \\
+7 & Vehicle & $(255, 0, 245)$ & \texttt{\#FF00F5} & Cars, pickup trucks, SUVs, buses, and commercial trailers. \\
+8 & Pool & $(255, 235, 0)$ & \texttt{\#FFEB00} & Residential and commercial swimming pools (clear water). \\
+9 & Grass & $(4, 250, 7)$ & \texttt{\#04FA07} & Maintained lawns, pastures, and open fields. \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\section{Hyperparameter Configurations and Training Environment}
+Table~\ref{tab:appendix_hyperparams} provides the comprehensive hyperparameter settings utilized for fine-tuning the SOTA SegFormer-B3 architecture on the NVIDIA GeForce GTX 1650 workstation.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Comprehensive SOTA SegFormer Training Hyperparameters and Hardware Configuration.}
+\label{tab:appendix_hyperparams}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l l}
+\toprule
+\textbf{Parameter / Configuration} & \textbf{Setting / Value} \\
+\midrule
+Backbone Architecture & SegFormer-B3 (\texttt{nvidia/mit-b3}) \\
+Pre-trained Weights & ImageNet-1k Classification Pre-training \\
+Decode Head & All-MLP Linear Decoder ($C = 10$ classes) \\
+Input Crop Size & $512 \times 512$ pixels (Random multi-scale aerial crops) \\
+Batch Size (Physical) & 1 image per step (VRAM constrained) \\
+Gradient Accumulation Steps & 4 steps (Effective Batch Size = 4) \\
+Base Learning Rate & $6.0 \times 10^{-5}$ \\
+Minimum Learning Rate & $1.0 \times 10^{-6}$ \\
+Learning Rate Scheduler & CosineAnnealingLR ($T_{max} = 12$ epochs) \\
+Optimizer & AdamW ($\beta_1 = 0.9, \beta_2 = 0.999$, Weight Decay $= 10^{-4}$) \\
+Loss Function & DiceFocalLoss ($\mathcal{L}_{DiceFocal}$) \\
+Sampling Strategy & Class-Balanced Sampling (Inverse-sqrt frequency weighting) \\
+Dice Loss Weight ($w_{dice}$) & 0.50 (Soft multi-class Dice overlap) \\
+Focal Loss Weight ($w_{focal}$) & 0.50 (Focusing $\gamma = 2.0$, $\alpha = 0.25$) \\
+Class Weighting Ceiling & $\kappa = 3.0$ (Inverse class frequency ceiling cap) \\
+Training Epochs & 12 epochs \\
+Validation Interval & Evaluated every 2 epochs \\
+Numerical Precision & Single-Precision 32-bit Floating Point (FP32) \\
+Data Augmentation & Random Horizontal Flip ($p=0.5$), Vertical Flip ($p=0.5$), \\
+& Random Rotation ($\pm 10^\circ$), Photometric Jitter (Brightness/Contrast $\pm 10\%$) \\
+Sliding Window Dimensions & Window Size = $512 \times 512$, Stride = $256$ pixels (50\% overlap) \\
+Sliding Window Feathering & 2D Isotropic Gaussian Kernel ($\sigma = 128$) \\
+Test-Time Augmentation (TTA) & Multi-Scale ($\times 0.85, \times 1.0, \times 1.15$) + Dihedral Flips \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\section{Sample Grounded Disaster Situation Report (SITREP)}
+Below is an authentic sample of the automated Disaster Situation Report synthesized by FloodSense for aerial scene 10169:
+
+\begin{footnotesize}
+\begin{verbatim}
+======================================================================
+FLOODSENSE AUTOMATED DISASTER SITUATION REPORT (SITREP)
+INCIDENT ID: FLD-2026-10169 | CLASSIFICATION: OFFICIAL EMERGENCY USE
+GENERATED: 2026-10-24T00:31:25 | PLATFORM: UAV DJI PHANTOM 4 PRO
+======================================================================
+
+1. EXECUTIVE SUMMARY & SEVERITY ASSESSMENT
+----------------------------------------------------------------------
+Comprehensive multi-class aerial semantic parsing of the surveyed
+sector confirms severe urban flash flooding. Multiple residential
+dwellings are isolated by high turbidity floodwaters.
+* Composite Disaster Severity Index: 76.4 / 100
+* Operational Severity Tier: LEVEL 4 (CATASTROPHIC INUNDATION)
+* Primary Incident Threat: Life-safety entrapment and road cutoffs.
+
+2. QUANTITATIVE DAMAGE TELEMETRY
+----------------------------------------------------------------------
+* Total Surveyed Area: 58,400 m^2
+* Total Flood Inundation Footprint: 23,450 m^2 (40.1% inundation)
+* Building Inundation: 6 of 14 structures flooded (42.8% damage)
+* Road Network Status: 38.2% of local roads submerged and impassable
+* Trapped / Submerged Vehicles: 3 confirmed vehicles in hazard zone
+
+3. TACTICAL INCIDENT ACTION PLAN (STATUTORY GROUNDED)
+----------------------------------------------------------------------
+PHASE 1: IMMEDIATE LIFE SAFETY & EVACUATION (0 - 6 HOURS)
+- Deploy two (2) NDRF motorized inflatable rescue boats (IRBs) to
+  residential sector B [NDRF Flood SOP Sec 4.1].
+- Prioritize evacuation of 6 flooded single-story structures;
+  establish rooftop winch coordinates [NDMA Guidelines Sec 5.2.1].
+- Dispatch high-clearance ambulances to perimeter intersection Alpha.
+
+PHASE 2: ACCESS RESTORATION & UTILITY ISOLATION (6 - 12 HOURS)
+- Implement immediate physical road closures on inundated corridor 3;
+  erect high-water warning barriers [FEMA P-1020].
+- Request municipal electrical utility grid isolation for sector 10169
+  to eliminate submerged electrocution hazards [NDMA Sec 6.4.3].
+
+PHASE 3: DRAINAGE & SUSTAINMENT (12 - 24 HOURS)
+- Position two (2) high-capacity diesel dewatering pump units (500 gpm)
+  at southern culvert junction to accelerate drainage [NDMA Sec 7.1].
+- Deliver clean bottled water and medical kits to dry buildings.
+
+4. STATUTORY CITATION AND AUDIT TRAIL
+----------------------------------------------------------------------
+[1] National Disaster Management Authority (NDMA), Govt of India:
+    "Management of Floods Guidelines", Section 5.2.1.
+[2] National Disaster Response Force (NDRF): "Standard Operating
+    Procedures for Flood Rescue Operations", Section 4.1.
+[3] Federal Emergency Management Agency (FEMA): "National Incident
+    Management System (NIMS) Operations Manual P-1020", Section 3.4.
+======================================================================
+\end{verbatim}
+\end{footnotesize}

@@ -1,18 +1,18 @@
 # FloodSense Research and Deployment Upgrade Plan
 
-> **Status:** Approved — local-first implementation; no Azure provisioning
+> **Status:** Deployed and verified — inference reclassifies Grass as Water on existing services only
 
-Generated: 2026-10-22
+Generated: 2026-10-22; rollout approved and completed 2026-10-24
 
 ---
 
 ## 1. Project Overview
 
-**Goal:** Audit the actual FloodSense inference path, establish reproducible segmentation baselines, research suitable flood datasets/models, improve image-derived impact inspection, and prepare a bounded asynchronous inference design without disrupting the live Vercel + Azure Container Apps POC.
+**Goal:** Audit the actual FloodSense inference path, establish reproducible segmentation baselines, research suitable flood datasets/models, improve image-derived impact inspection, and roll out the selected fine-tuned SegFormer checkpoint loader to the existing Azure Container App.
 
 **Path:** Modernize Existing
 
-**Scope:** Local implementation, tests, research notes, and deployment templates. No Azure resource creation, production deployment, GPU spend, or model/dataset downloads with material cost until separately confirmed.
+**Scope:** Build and deploy the updated backend image to the existing `floodsense-backend` Container App in `floodsense-rg` (East Asia), using the existing `floodsenseacr` registry. No new Azure resources, CPU/memory changes, GPU spend, or changes to depth/SAM behavior. The private checkpoint is already uploaded to `Sanjanasiri/floodsense-segformer-b3-class-balanced`; credentials remain in Azure secrets and are not handled in chat.
 
 ---
 
@@ -24,8 +24,8 @@ Generated: 2026-10-22
 | Scale | Small (<1K users) |
 | Budget | Cost-optimized; Azure for Students credits; avoid new recurring charges by default |
 | Compliance | Research/demo; do not represent image-derived results as verified emergency assessments |
-| Subscription | Azure for Students (`e9c86aba-e4b0-46e2-b8b0-8de6273b2444`), previously confirmed; reconfirm before deployment |
-| Location | East Asia (`eastasia`), previously permitted by subscription policy; reconfirm before deployment |
+| Subscription | Azure for Students (`e9c86aba-e4b0-46e2-b8b0-8de6273b2444`), confirmed for this rollout |
+| Location | East Asia (`eastasia`), confirmed as the existing Container App location |
 
 ---
 
@@ -53,13 +53,13 @@ Generated: 2026-10-22
 
 ## 4. Recipe Selection
 
-**Selected:** Bicep for repeatable Azure resource definitions; existing Azure CLI and ACR flow retained for local image build/push.
+**Selected:** Existing Azure CLI and ACR image build/push flow for this release; no infrastructure changes or resource provisioning.
 
 **Rationale:**
 
 - The current deployment uses existing Azure Container Apps and ACR resources and has no `azure.yaml` or IaC.
 - A future durable worker requires explicit, reviewable queue/storage and identity configuration.
-- No infrastructure will be provisioned as part of local implementation without a separate cost/deployment approval.
+- This release reuses the existing Container App and ACR; it does not create infrastructure or change the app's resource allocation.
 
 ---
 
@@ -92,7 +92,7 @@ Generated: 2026-10-22
 
 - Prefer managed identity and least-privilege queue/blob roles if Azure provisioning is later approved.
 - Do not put registry passwords, Supabase service-role credentials, or other secrets in source, browser-visible variables, or generated deployment output.
-- New Storage/queue/monitoring resources can incur recurring charges. No provisioning or deployment without a separate user approval after a cost estimate.
+- The existing app remains at its current CPU/memory allocation. The 189 MB private checkpoint is downloaded from Hugging Face at runtime and cached in the container's writable storage; no new Azure resources are provisioned.
 
 ---
 
@@ -122,14 +122,15 @@ Generated: 2026-10-22
 - [ ] Add worker processing, bounded concurrency, status/error/retry semantics, and stale-job recovery
 - [ ] Enforce image/request limits, safe artifact handling, authentication/ownership, structured logs, and observable health
 - [ ] Add tests for job lifecycle, persistence, authorization, metrics, and frontend progress/error handling
-- [x] Keep external Azure provisioning disabled until cost and subscription approval
+- [x] Restrict this approved rollout to the existing Container App and registry; no new Azure resources or scaling changes
 
 ### Phase 5 — Validation and deployment readiness
 - [x] Run focused backend tests, frontend build, and inference smoke tests; reproducible benchmark is blocked by missing labels
 - [x] Update README with measured results, model/dataset licenses, model retrieval, environment variables, and deployment procedure
 - [x] Produce a final status table separating local implementation, local validation, cloud deployment, and production verification
-- [ ] Invoke `azure-validate` before any deployment
-- [ ] Invoke `azure-deploy` only after validation and separate user approval for cloud changes
+- [x] Validate the selected Azure subscription, existing app/registry, runtime settings, and model-secret reference
+- [x] Invoke `azure-validate` before the image rollout
+- [x] Deploy the updated image to the existing Container App and verify health, model identity, and segmentation inference
 
 ---
 
@@ -137,12 +138,59 @@ Generated: 2026-10-22
 
 Local validation completed:
 
-- `PYTHONPATH=. USE_TF=0 .venv/bin/python -m unittest discover -s tests -p 'test_*.py'` — passed (20 tests).
-- `cd frontend && npm run build` — passed, including Next.js type checking.
+- Grass-to-Water release validation: 2026-10-25 01:42 IST.
+- `PYTHONPATH=. USE_TF=0 .venv/bin/python -m unittest discover -s tests -p 'test_model_reporting.py'` — passed (13 tests), including `/api/segment` overlay, class-mask, flood-mask, metric, and `/api/analyze` reporting checks after reclassification.
+- `PYTHONPATH=. USE_TF=0 .venv/bin/python -m py_compile dashboard/server.py tests/test_model_reporting.py` — passed.
+- `npm --prefix /tmp/floodsense-grass-water-release/frontend run build` — passed for the isolated frontend release based on current `main`.
+- `docker build --platform linux/amd64 -t floodsenseacr.azurecr.io/floodsense-backend:grass-as-water-20261025-0137 .` — passed; image digest `sha256:4e5a4b0fb0179e38e61e55b619bf5443b9ee152b481ced012e02ea17a4c6b94f`.
+- `az acr repository show-tags --name floodsenseacr --repository floodsense-backend --detail --query "[?name=='grass-as-water-20261025-0137']"` — confirmed the image tag and digest in the existing registry.
+- Azure for Students subscription confirmed; existing app `floodsense-backend` and registry `floodsenseacr` are in East Asia. App allocation is 1 vCPU / 2 GiB and current API status is online.
+- Subscription region-restriction policy reviewed; the rollout reuses the existing app and registry and provisions no resources.
+- `git diff --check` — passed.
+- Deployed image `floodsenseacr.azurecr.io/floodsense-backend:grass-as-water-20261025-0137` to the existing Container App. The active revision is healthy with 100% traffic; CPU/memory remain at 1 vCPU / 2 GiB.
+- Live `/api/segment` smoke test using a synthetic green image returned `model_used=segformer`, `grass_pixels=0`, and `water_pixels=262144`; the response explicitly describes the class reclassification and its vegetation-related overestimation risk.
+- Post-deployment `/api/status` returned `status=online`; `/api/models` still recommends Class-balanced SegFormer-B3.
+- Frontend PR #5 merged as `4dfeb44f3986febe40907840fa3dca03a67ed8de`; Vercel production deployment succeeded. Live 3D and chat bundles both show the Grass-to-Water class alias in blue (`#0284C7`).
+
+- Water blue-only release validation: 2026-10-25 01:10 IST.
+- `PYTHONPATH=. USE_TF=0 .venv/bin/python -m unittest discover -s tests -p 'test_model_reporting.py'` — passed (12 tests), including checks that Water's overlay is blue, Grass retains its own color, and class IDs are unchanged.
+- `npm --prefix /tmp/floodsense-water-blue-release/frontend run build` — passed for the isolated frontend release based on current `main`.
+- `docker build --platform linux/amd64 -t floodsenseacr.azurecr.io/floodsense-backend:water-blue-only-20261025-0110 .` — passed; the image only changes the Water display palette in the existing API code.
+- `az account show` — confirmed Azure for Students (`e9c86aba-e4b0-46e2-b8b0-8de6273b2444`).
+- `az containerapp show --name floodsense-backend --resource-group floodsense-rg ...` — confirmed the existing East Asia app is provisioned, online, and unchanged at 1 vCPU / 2 GiB.
+- `GET https://floodsense-backend.redplant-8f5bef3d.eastasia.azurecontainerapps.io/api/status` — returned `status=online`.
+- `az policy assignment list --scope /subscriptions/e9c86aba-e4b0-46e2-b8b0-8de6273b2444` — reviewed the assigned `sys.regionrestriction` policy; the image update uses the existing resource in its current region and provisions no resources.
+- `git diff --check` — passed.
+- This blue-only validation supersedes the light-mint display color release recorded below.
+- Deployed `floodsenseacr.azurecr.io/floodsense-backend:water-blue-only-20261025-0110` to the existing Azure Container App. The active revision is healthy with 100% traffic; the app remains at 1 vCPU / 2 GiB.
+- Post-deployment `/api/status` returned `status=online`; `/api/models` continues to recommend Class-balanced SegFormer-B3.
+- Frontend PR #4 merged as `1e46a4a9315684a1f63c32c57d306fe261bf24cc`; Vercel production deployment succeeded. Live 3D and chat bundles both report Water as `#0284C7`.
+
+- Water light-mint release validation: 2026-10-25 00:58 IST.
+- `PYTHONPATH=. USE_TF=0 .venv/bin/python -m unittest discover -s tests -p 'test_model_reporting.py'` — passed (12 tests), including assertions that Water uses the new display color and class IDs remain unchanged.
+- `npm --prefix /tmp/floodsense-water-release/frontend run build` — passed for the isolated frontend release based on current `main`.
+- `docker build --platform linux/amd64 -t floodsenseacr.azurecr.io/floodsense-backend:water-light-mint-20261025-0048 .` — passed; the pushed image digest is `sha256:d3f4992984418f0eee97a18f09384126fc1809eabf80b2f61725659f44c1e45f`.
+- `az acr repository show-tags --name floodsenseacr --repository floodsense-backend --detail --query "[?name=='water-light-mint-20261025-0048']"` — confirmed the image tag and digest in the existing registry.
+- Azure preflight confirmed the existing Container App is in East Asia, healthy on its current revision with 100% traffic, and the existing API status endpoint is online. The subscription's region-restriction policy was reviewed; this release changes only the existing app image and provisions no resources.
+- Deployed the backend image to the existing Container App on 2026-10-25 at 01:03 IST. The app reports provisioning success, the active revision is healthy with 100% traffic, and the existing 1 vCPU / 2 GiB allocation is unchanged.
+- Post-deployment `GET /api/status` returned `status=online`; `GET /api/models` continued to recommend Class-balanced SegFormer-B3.
+- Historical color release: frontend PR #3 merged as `da22a34fe1f3430050d6db04a92b97d8ae2584ce` and briefly deployed light-mint Water; that display was superseded by the blue-only release above.
+- Validation and deployment completed: 2026-10-24, approximately 23:54 IST.
+- `PYTHONPATH=. USE_TF=0 .venv/bin/python -m unittest discover -s tests -p 'test_model_reporting.py'` — passed (11 tests).
+- `PYTHONPATH=. USE_TF=0 .venv/bin/python -m py_compile dashboard/server.py tests/test_model_reporting.py` — passed.
 - `git diff --check` — passed.
 - `/api/segment` and `/api/models` fallback behavior is covered by focused tests; the inference response identifies classical CV rather than claiming SegFormer.
-- A reproducible model benchmark was not run because the checkout lacks paired labels and a validation/test split. No model was trained or downloaded.
-- Azure validation and deployment were intentionally not run; no Azure resources were provisioned.
+- A reproducible model benchmark was not run because the checkout lacks paired labels and a validation/test split. No model was trained; the existing checkpoint was downloaded from the configured private Hub repo at runtime.
+- Azure preflight: active subscription is Azure for Students (`e9c86aba-e4b0-46e2-b8b0-8de6273b2444`); target app is `floodsense-backend` in `floodsense-rg` (East Asia), registry is `floodsenseacr` (East Asia), and app allocation is unchanged at 1 vCPU / 2 GiB.
+- Azure preflight: model environment settings point to `Sanjanasiri/floodsense-segformer-b3-class-balanced`; `HF_TOKEN` references the existing `hf-token` secret (secret value not read).
+- `az account set --subscription e9c86aba-e4b0-46e2-b8b0-8de6273b2444` and `az account show` — passed; subscription matches user confirmation.
+- The pre-rollout `GET /api/models` identified that the old image lacked the fine-tuned checkpoint.
+- Subscription policy listing returned `sys.regionrestriction`; this rollout retains the existing East Asia app and creates no resources or location changes.
+- `az acr build` was denied with `TasksOperationsNotAllowed`; built and pushed the image locally instead: `floodsenseacr.azurecr.io/floodsense-backend:segformer-b3-20261024-235404` (`sha256:62e5c342d6f4597e4f1f73a2cd1c38387c42ad260739a567558638c6b150866b`).
+- Updated only the existing `floodsense-backend` app to the new image. Azure reports provisioning succeeded; the active revision is healthy and serves 100% traffic. App allocation remains 1 vCPU / 2 GiB.
+- `GET /api/status` — online after deployment. `GET /api/models` — recommends `Class-balanced SegFormer-B3`; metrics are null because no independently reproduced held-out benchmark is published.
+- Posted a demo image to `POST /api/segment` with `model=segformer`; response succeeded with `model_used=segformer`, `model_display_name=Class-balanced SegFormer-B3`, `fallback_applied=false`, and 3,473.4 ms inference.
+- No Azure resources were provisioned or resized.
 
 ---
 
@@ -150,7 +198,7 @@ Local validation completed:
 
 | File or area | Purpose | Status |
 |--------------|---------|--------|
-| `.azure/plan.md` | Source-of-truth scope, decisions, and validation record | Updated; Azure validation pending by design |
+| `.azure/plan.md` | Source-of-truth scope, decisions, and validation record | Updated; existing-app rollout deployed and verified |
 | `README.md` | Baseline, dataset/model caveats, usage and deployment docs | Updated |
 | `models_benchmark/` and `tests/` | Reproducible audit, benchmark and inference tests | Metric fixes and tests complete; full benchmark blocked by missing labels |
 | `dashboard/` | Explicit model identity, API validation and job endpoints | Model fallback reporting corrected; durable jobs not implemented |
@@ -161,9 +209,9 @@ Local validation completed:
 
 ## 9. Next Steps
 
-> Current: Local audit and reporting corrections complete. Additional training and a fair benchmark are blocked on restoring authorized paired labels. Azure work remains explicitly out of scope.
+> Current: Class-balanced SegFormer-B3 is deployed and confirmed active for segmentation only on the existing Azure Container App. All predicted Grass pixels are merged into Water; this intentionally may overstate flood coverage over vegetation. No independently reproduced held-out benchmark is available.
 
 1. Restore the matching FloodNet train/validation masks and split manifest before training or benchmarking.
 2. Evaluate the existing checkpoint and alternatives on a fixed held-out split; report per-class metrics and latency.
 3. Design and validate a durable asynchronous job system only if the product requires it.
-4. Reconfirm Azure subscription, permitted region, and cost before any deployment workflow.
+4. Restore the matching FloodNet validation data before reporting new model performance metrics.

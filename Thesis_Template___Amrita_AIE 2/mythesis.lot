@@ -1,0 +1,18 @@
+\babel@toc {english}{}\relax 
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {2.1}{\ignorespaces Comprehensive Synthesis and Taxonomy of State-of-the-Art Post-Disaster AI Frameworks.}}{12}{table.2.1}%
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {4.1}{\ignorespaces FloodNet Multi-Class Semantic Color Palette and Class Descriptions.}}{22}{table.4.1}%
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {6.1}{\ignorespaces Empirical Benchmark Comparison Across Five Vision Paradigms on Multi-Class FloodNet Imagery.}}{38}{table.6.1}%
+\contentsline {table}{\numberline {6.2}{\ignorespaces Detailed Per-Class Quantitative Segmentation Performance of SOTA SegFormer.}}{40}{table.6.2}%
+\contentsline {table}{\numberline {6.3}{\ignorespaces Ablation Study: Impact of Input Resolution, Gaussian Feathering, and TTA on Fine-Scale Segmentation.}}{41}{table.6.3}%
+\contentsline {table}{\numberline {6.4}{\ignorespaces Quantitative Information Retrieval Metrics of the ChromaDB RAG Knowledge Repository.}}{41}{table.6.4}%
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {A.1}{\ignorespaces Detailed FloodNet Annotation Specifications and RGB Color Keys.}}{52}{table.A.1}%
+\contentsline {table}{\numberline {A.2}{\ignorespaces Comprehensive SOTA SegFormer Training Hyperparameters and Hardware Configuration.}}{53}{table.A.2}%

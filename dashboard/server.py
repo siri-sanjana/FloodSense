@@ -56,6 +56,7 @@ from damage_extraction.damage_extractor import (
     CLASS_DISPLAY_COLORS,
     rgb_mask_to_class_mask,
     count_components,
+    extract_component_bounding_boxes,
 )
 import importlib
 
@@ -103,17 +104,57 @@ SEGFORMER_CHECKPOINT = os.environ.get(
         "segformer_best.pt",
     ),
 )
+SEGFORMER_REPO_ID = os.environ.get("FLOODSENSE_SEGFORMER_REPO_ID")
+SEGFORMER_REPO_FILENAME = os.environ.get(
+    "FLOODSENSE_SEGFORMER_REPO_FILENAME",
+    "segformer_best.pt",
+)
+SEGFORMER_REPO_REVISION = os.environ.get("FLOODSENSE_SEGFORMER_REPO_REVISION", "main")
+ENABLE_FINETUNED_SEGFORMER = (
+    os.environ.get("FLOODSENSE_ENABLE_FINETUNED_SEGFORMER", "0") == "1"
+)
+FINETUNED_SEGFORMER_DISPLAY_NAME = os.environ.get(
+    "FLOODSENSE_SEGFORMER_DISPLAY_NAME",
+    "FloodNet SegFormer-B3 (Fine-Tuned Checkpoint)",
+)
 
 
 def has_finetuned_segformer():
-    return os.path.isfile(SEGFORMER_CHECKPOINT)
+    return os.path.isfile(SEGFORMER_CHECKPOINT) or bool(SEGFORMER_REPO_ID)
+
+
+def resolve_segformer_checkpoint():
+    if not SEGFORMER_REPO_ID:
+        if not os.path.isfile(SEGFORMER_CHECKPOINT):
+            raise FileNotFoundError(
+                f"SegFormer checkpoint not found: {SEGFORMER_CHECKPOINT}"
+            )
+        return SEGFORMER_CHECKPOINT
+
+    from huggingface_hub import hf_hub_download
+
+    return hf_hub_download(
+        repo_id=SEGFORMER_REPO_ID,
+        filename=SEGFORMER_REPO_FILENAME,
+        revision=SEGFORMER_REPO_REVISION,
+        token=(
+            os.environ.get("HF_TOKEN")
+            or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+        ),
+        cache_dir=os.environ.get("FLOODSENSE_MODEL_CACHE_DIR"),
+    )
 
 
 def can_use_finetuned_segformer():
     return (
         has_finetuned_segformer()
-        and os.environ.get("RENDER") is None
-        and os.environ.get("DISABLE_HEAVY_CV", "0") != "1"
+        and (
+            ENABLE_FINETUNED_SEGFORMER
+            or (
+                os.environ.get("RENDER") is None
+                and os.environ.get("DISABLE_HEAVY_CV", "0") != "1"
+            )
+        )
     )
 
 
@@ -127,8 +168,23 @@ def heavy_cv_disabled():
 def get_segformer():
     global segformer_instance
     if segformer_instance is None:
-        # On Render / CPU cloud instances, use fast Classical CV pipeline to prevent 90s Hugging Face download timeouts
-        if heavy_cv_disabled():
+        if ENABLE_FINETUNED_SEGFORMER:
+            if not has_finetuned_segformer():
+                raise FileNotFoundError(
+                    "FLOODSENSE_ENABLE_FINETUNED_SEGFORMER=1 but the configured "
+                    f"checkpoint does not exist: {SEGFORMER_CHECKPOINT}"
+                )
+            print(
+                "[Model Loader] Explicit fine-tuned SegFormer enabled; loading "
+                + (
+                    f"{SEGFORMER_REPO_ID}/{SEGFORMER_REPO_FILENAME}"
+                    if SEGFORMER_REPO_ID
+                    else f"checkpoint from {SEGFORMER_CHECKPOINT}"
+                )
+                + "."
+            )
+        elif heavy_cv_disabled():
+            # Keep the cloud fallback unless the fine-tuned model is explicitly enabled.
             print("[Model Loader] Cloud env detected — using Classical CV for SegFormer slot.")
             class FastCloudSegFormer:
                 model_id = "classical"
@@ -144,11 +200,11 @@ def get_segformer():
         if can_use_finetuned_segformer():
             print(
                 "[Model Loader] Loading FloodNet fine-tuned SegFormer-B3 "
-                f"from {SEGFORMER_CHECKPOINT}."
+                "checkpoint."
             )
             segformer_instance = SegFormerSegmenter(
                 model_name="nvidia/mit-b3",
-                checkpoint_path=SEGFORMER_CHECKPOINT,
+                checkpoint_path=resolve_segformer_checkpoint(),
             )
         else:
             print(
@@ -205,7 +261,7 @@ def select_best_model_for_image(img_rgb: np.ndarray):
     - High road/concrete uniformity → Classical CV for rapid high-contrast edge thresholding
     - Default → SegFormer
     """
-    if has_finetuned_segformer():
+    if can_use_finetuned_segformer():
         return (
             "segformer",
             "FloodNet fine-tuned SegFormer-B3 is available and recommended for "
@@ -294,6 +350,18 @@ def handle_400_error(e):
     }), 400
 
 # ── Color Overlay Generator ────────────────────────────────────────────────
+GRASS_AS_WATER_NOTE = (
+    "All class-9 Grass pixels are reclassified as class-5 Water before "
+    "overlays and flood metrics; water extent may include vegetation."
+)
+
+
+def reclassify_grass_as_water(class_mask: np.ndarray) -> np.ndarray:
+    remapped_mask = np.array(class_mask, copy=True)
+    remapped_mask[remapped_mask == 9] = 5
+    return remapped_mask
+
+
 def generate_color_overlay(img_rgb: np.ndarray, class_mask: np.ndarray, target_size=None) -> np.ndarray:
     h, w = class_mask.shape
     color_layer = np.zeros((h, w, 3), dtype=np.uint8)
@@ -313,10 +381,33 @@ def extract_metrics_from_class_mask(class_mask: np.ndarray) -> dict:
         class_counts[label] = cnt
         class_pct[label] = round(cnt / total * 100, 3)
 
+    h, w = class_mask.shape[:2]
     fb_mask = (class_mask == 1).astype(np.uint8)
     nfb_mask = (class_mask == 2).astype(np.uint8)
-    fb_cnt, _ = count_components(fb_mask, 300)
-    nfb_cnt, _ = count_components(nfb_mask, 300)
+    fb_cnt, fb_sizes, fb_boxes = extract_component_bounding_boxes(
+        fb_mask,
+        class_id=1,
+        class_name="Building (Flooded)",
+        min_pixels=250,
+        is_flooded=True,
+        id_prefix="STR-F",
+        image_shape=(h, w),
+    )
+    nfb_cnt, nfb_sizes, nfb_boxes = extract_component_bounding_boxes(
+        nfb_mask,
+        class_id=2,
+        class_name="Building (Safe)",
+        min_pixels=250,
+        is_flooded=False,
+        id_prefix="STR-S",
+        image_shape=(h, w),
+    )
+
+    all_building_boxes = fb_boxes + nfb_boxes
+    all_building_boxes.sort(key=lambda b: b["area_px"], reverse=True)
+    for idx, b in enumerate(all_building_boxes, start=101):
+        b["id"] = f"STR-{idx}"
+
     fb_px = int(np.sum(fb_mask))
     nfb_px = int(np.sum(nfb_mask))
     
@@ -327,7 +418,15 @@ def extract_metrics_from_class_mask(class_mask: np.ndarray) -> dict:
     pool_px = int(np.sum(class_mask == 8))
     veh_px = int(np.sum(class_mask == 7))
     veh_mask = (class_mask == 7).astype(np.uint8)
-    veh_cnt, _ = count_components(veh_mask, 60)
+    veh_cnt, veh_sizes, veh_boxes = extract_component_bounding_boxes(
+        veh_mask,
+        class_id=7,
+        class_name="Vehicle",
+        min_pixels=50,
+        is_flooded=False,
+        id_prefix="VEH",
+        image_shape=(h, w),
+    )
     
     flood_px = fb_px + fr_px + water_px + pool_px
     flood_pct = round(flood_px / total * 100, 3)
@@ -358,6 +457,8 @@ def extract_metrics_from_class_mask(class_mask: np.ndarray) -> dict:
         sev_label = "MINOR"
     else:
         sev_label = "NONE"
+
+    all_detected_objects = all_building_boxes + veh_boxes
     
     return {
         "analysis_method": "Multi-Class Semantic Segmentation",
@@ -386,6 +487,7 @@ def extract_metrics_from_class_mask(class_mask: np.ndarray) -> dict:
             "non_flooded_building_area_m2": None,
             "total_building_count": fb_cnt + nfb_cnt,
             "building_flood_ratio": round(fb_cnt / max(1, fb_cnt + nfb_cnt), 3),
+            "detected_structures": all_building_boxes,
         },
         "roads": {
             "flooded_road_coverage_pct": round(fr_px / total * 100, 3),
@@ -407,7 +509,9 @@ def extract_metrics_from_class_mask(class_mask: np.ndarray) -> dict:
             "vehicle_component_count_estimate": veh_cnt,
             "vehicle_area_pct": round(veh_px / total * 100, 3),
             "vehicle_area_px": veh_px,
+            "detected_vehicles": veh_boxes,
         },
+        "detected_objects": all_detected_objects,
         "class_pixel_counts": class_counts,
         "class_pixel_distribution_pct": class_pct,
     }
@@ -451,7 +555,23 @@ def api_status():
 def api_models():
     finetuned_segformer = can_use_finetuned_segformer()
     cv_disabled = heavy_cv_disabled()
-    if cv_disabled:
+    if finetuned_segformer:
+        segformer_name = FINETUNED_SEGFORMER_DISPLAY_NAME
+        segformer_description = (
+            "The explicitly configured FloodNet fine-tuned SegFormer-B3 "
+            "checkpoint is enabled for semantic segmentation."
+        )
+        sam_name = "Classical CV (SAM request fallback)" if cv_disabled else (
+            "SAM (Segment Anything Model)"
+        )
+        sam_description = (
+            "This runtime disables other heavy computer-vision models; SAM "
+            "requests are served by the classical color/threshold segmenter."
+            if cv_disabled
+            else "Promptable segmentation backend; initialization may fall back "
+            "to classical CV, which is identified by the inference response."
+        )
+    elif cv_disabled:
         segformer_name = "Classical CV (SegFormer request fallback)"
         segformer_description = (
             "This runtime disables heavy computer vision; SegFormer requests are "
@@ -461,17 +581,6 @@ def api_models():
         sam_description = (
             "This runtime disables heavy computer vision; SAM requests are served "
             "by the classical color/threshold segmenter."
-        )
-    elif finetuned_segformer:
-        segformer_name = "FloodNet SegFormer-B3 (Fine-Tuned Checkpoint)"
-        segformer_description = (
-            "A local FloodNet 10-class checkpoint is available. Its historical "
-            "validation result is not independently verified on the current split."
-        )
-        sam_name = "SAM (Segment Anything Model)"
-        sam_description = (
-            "Promptable segmentation backend; initialization may fall back to "
-            "classical CV, which is identified by the inference response."
         )
     else:
         segformer_name = "ADE20K-pretrained SegFormer (heuristic FloodNet mapping)"
@@ -495,7 +604,7 @@ def api_models():
             "macro_f1": None,
             "latency_ms": None,
             "metrics_status": metrics_status,
-            "recommended": finetuned_segformer and not cv_disabled,
+            "recommended": finetuned_segformer,
         },
         {
             "id": "classical",
@@ -505,7 +614,7 @@ def api_models():
             "macro_f1": None,
             "latency_ms": None,
             "metrics_status": metrics_status,
-            "recommended": cv_disabled,
+            "recommended": cv_disabled and not finetuned_segformer,
         },
         {
             "id": "sam",
@@ -707,6 +816,7 @@ def api_segment():
             "error": "Segmentation model returned an invalid 10-class mask.",
         }), 500
 
+    class_mask = reclassify_grass_as_water(class_mask)
     binary_mask = np.isin(class_mask, [1, 3, 5, 8]).astype(np.uint8)
     overlay_rgb = generate_color_overlay(
         image_rgb,
@@ -734,13 +844,17 @@ def api_segment():
     overlay_url = _save_inference_png("overlay", overlay_rgb)
     inference_ms = round((time.perf_counter() - started_at) * 1000, 1)
 
+    damage_metrics = extract_metrics_from_class_mask(class_mask)
+    damage_metrics["class_reclassification"] = GRASS_AS_WATER_NOTE
+    damage_metrics["metric_basis"] += f" {GRASS_AS_WATER_NOTE}"
+
     return jsonify({
         "status": "success",
         "requested_model": requested_model,
         "model_used": model_used,
         "fallback_applied": requested_model != model_used,
         "model_display_name": (
-            "FloodNet SegFormer-B3 (Fine-Tuned Checkpoint)"
+            FINETUNED_SEGFORMER_DISPLAY_NAME
             if model_used == "segformer" and can_use_finetuned_segformer()
             else "ADE20K-pretrained SegFormer (heuristic FloodNet mapping)"
             if model_used == "segformer"
@@ -757,8 +871,9 @@ def api_segment():
             str(class_id): label
             for class_id, (label, _) in COLOR_PALETTE.items()
         },
+        "class_reclassification": GRASS_AS_WATER_NOTE,
         "timings": {"inference_ms": inference_ms},
-        "damage_metrics": extract_metrics_from_class_mask(class_mask),
+        "damage_metrics": damage_metrics,
         "class_mask_url": class_mask_url,
         "binary_mask_url": binary_mask_url,
         "overlay_url": overlay_url,
@@ -908,10 +1023,20 @@ def api_analyze():
                 _, class_mask = segformer.segment_image(img_rgb)
         except Exception as cv_err:
             print(f"[CV Segmentation Notice] Model '{model_name}' fallback triggered ({cv_err}). Using Classical CV.")
+            if (
+                model_name == "segformer"
+                and ENABLE_FINETUNED_SEGFORMER
+            ):
+                return jsonify({
+                    "status": "error",
+                    "error": "Configured fine-tuned SegFormer inference failed.",
+                    "detail": str(cv_err),
+                }), 503
             _, class_mask = segment_classical_multiclass(img_rgb)
             model_name = "classical"
             
         inference_ms = round((time.time() - inference_t0) * 1000, 1)
+        class_mask = reclassify_grass_as_water(class_mask)
 
         depth_t0 = time.time()
         depth_status = "not_applicable" if is_mask_upload else "error"
@@ -939,6 +1064,8 @@ def api_analyze():
 
         # ── Step 3: Extract Damage Metrics ──
         damage_metrics = extract_metrics_from_class_mask(class_mask)
+        damage_metrics["class_reclassification"] = GRASS_AS_WATER_NOTE
+        damage_metrics["metric_basis"] += f" {GRASS_AS_WATER_NOTE}"
         damage_metrics["model_used"] = model_name
         damage_metrics["recommended_model"] = rec_model
         damage_metrics["is_recommended"] = is_recommended
@@ -1015,6 +1142,7 @@ def api_analyze():
 
         response_payload = {
             "status": "success",
+            "class_reclassification": GRASS_AS_WATER_NOTE,
             "requested_model": requested_model or "auto",
             "timings": {
                 "cv_inference_ms": inference_ms,

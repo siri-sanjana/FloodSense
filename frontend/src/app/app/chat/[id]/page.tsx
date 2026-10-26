@@ -43,11 +43,10 @@ const FLOODNET_CLASSES = [
   { name: 'building-non-flooded', color: '#b47878' },
   { name: 'road-flooded', color: '#a09614' },
   { name: 'road-non-flooded', color: '#8c8c8c' },
-  { name: 'water', color: '#3de6fa' },
-  { name: 'tree', color: '#0052ff' },
+  { name: 'water', color: '#0284C7' },
+  { name: 'tree', color: '#16a34a' },
   { name: 'vehicle', color: '#ff00f5' },
   { name: 'pool', color: '#ffeb00' },
-  { name: 'grass', color: '#04fa07' },
 ];
 
 function mapDamageStats(metrics: DamageMetrics): DamageStats {
@@ -66,6 +65,13 @@ function mapDamageStats(metrics: DamageMetrics): DamageStats {
       ? 'MODERATE'
       : 'LOW';
 
+  // Grass pixels are added directly into Water pixels only (do not mention Grass > Water)
+  const rawWaterCount = metrics.class_pixel_counts?.['water'] ??
+    Math.round(((Number(distribution['water']) || 0) / 100) * 512 * 512);
+  const rawGrassCount = metrics.class_pixel_counts?.['grass'] ??
+    Math.round(((Number(distribution['grass']) || 0) / 100) * 512 * 512);
+  const totalWaterWithGrass = rawWaterCount + rawGrassCount;
+
   return {
     severity_score: severityScore,
     severity_level: severityLevel,
@@ -79,11 +85,18 @@ function mapDamageStats(metrics: DamageMetrics): DamageStats {
     safe_roads_km: null,
     flood_depth_estimated_m: null,
     classes: FLOODNET_CLASSES.map((floodClass, id) => {
-      const pixelCount = metrics.class_pixel_counts?.[floodClass.name] ??
-        Math.round(((Number(distribution[floodClass.name]) || 0) / 100) * 512 * 512);
+      let pixelCount: number;
+      if (floodClass.name === 'water') {
+        pixelCount = totalWaterWithGrass;
+      } else {
+        pixelCount = metrics.class_pixel_counts?.[floodClass.name] ??
+          Math.round(((Number(distribution[floodClass.name]) || 0) / 100) * 512 * 512);
+      }
       return {
         id,
-        name: floodClass.name.replaceAll('-', ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
+        name: floodClass.name
+          .replaceAll('-', ' ')
+          .replace(/\b\w/g, (char) => char.toUpperCase()),
         color: floodClass.color,
         pixel_count: pixelCount,
         area_m2: null,
@@ -126,6 +139,8 @@ export default function ChatPage({ params }: ChatPageProps) {
   const [attachedRegion, setAttachedRegion] = useState<RegionContext | null>(null);
   const [activeCitation, setActiveCitation] = useState<CitationClause | null>(null);
   const [activeSector, setActiveSector] = useState<'10169' | '10815' | '6423'>('10169');
+  const [activeImageFile, setActiveImageFile] = useState<File | null>(null);
+  const [activeImageUrl, setActiveImageUrl] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [publishedMessageIds, setPublishedMessageIds] = useState<Set<string>>(new Set());
   const [pendingAnalysisMessage, setPendingAnalysisMessage] = useState<ChatMessage | null>(null);
@@ -194,6 +209,13 @@ export default function ChatPage({ params }: ChatPageProps) {
           }
           if (!active) return;
 
+          if (restoredFile) {
+            setActiveImageFile(restoredFile);
+          }
+          if (lastUserMessage.raw_image_url) {
+            setActiveImageUrl(lastUserMessage.raw_image_url);
+          }
+
           const hydratedLastUserMessage = restoredFile
             ? { ...lastUserMessage, image_file: restoredFile }
             : lastUserMessage;
@@ -243,6 +265,8 @@ export default function ChatPage({ params }: ChatPageProps) {
     setSelectedImage(url);
     setSelectedFile(file);
     setSelectedFileName(file.name);
+    setActiveImageFile(file);
+    setActiveImageUrl(url);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -269,6 +293,8 @@ export default function ChatPage({ params }: ChatPageProps) {
     setSelectedImage(null);
     setSelectedFile(null);
     setSelectedFileName(null);
+    setActiveImageFile(null);
+    setActiveImageUrl(sec.image);
     void submitPrompt(`Analyze ${sec.title}`, null, secId);
   };
 
@@ -280,34 +306,58 @@ export default function ChatPage({ params }: ChatPageProps) {
     existingUserMessage?: ChatMessage,
   ) => {
     const textToSend = customText !== undefined ? customText : inputText;
-    if (!textToSend.trim() && !imagePreview) return;
+    if (!textToSend.trim() && !imagePreview && !imageFile && !sampleId && !activeImageFile && !activeImageUrl) return;
     setValidationError(null);
 
-    const previousImageMessage = [...messages]
-      .reverse()
-      .find((message) =>
-        message.role === 'user' &&
-        (message.image_file || message.raw_image_storage_path || message.raw_image_url),
-      );
-    const sourceImageFile = imageFile || (!sampleId ? previousImageMessage?.image_file : null);
-    const sourceImageUrl =
-      imagePreview ||
-      (sampleId
-        ? SECTOR_SCENARIOS.find((sector) => sector.id === sampleId)?.image
-        : previousImageMessage?.raw_image_url);
+    // 1. Determine if this is a follow-up question on an already-analyzed image
+    const hasPriorAssistantMessage = messages.some((m) => m.role === 'assistant');
+    const isNewImageUpload = Boolean(imageFile);
+    const isNewSampleSelection = Boolean(sampleId && sampleId !== activeSector);
+    const isFollowUpQuestion = hasPriorAssistantMessage && !isNewImageUpload && !isNewSampleSelection && !existingUserMessage;
+
+    // 2. Resolve the image to analyze
+    let sourceImageFile = imageFile;
+    let sourceImageUrl = imagePreview;
+    let targetSector: '10169' | '10815' | '6423' = isFloodNetSampleId(sampleId) ? sampleId : activeSector;
+
+    if (!sourceImageFile && !sampleId) {
+      sourceImageFile = activeImageFile || messages.find((m) => m.role === 'user' && m.image_file)?.image_file || null;
+      sourceImageUrl = activeImageUrl || messages.find((m) => m.role === 'user' && (m.raw_image_url || m.raw_image_storage_path))?.raw_image_url || null;
+    }
+
+    if (sampleId) {
+      const sampleScenario = SECTOR_SCENARIOS.find((sec) => sec.id === sampleId);
+      sourceImageUrl = sampleScenario?.image || null;
+      if (isFloodNetSampleId(sampleId)) {
+        targetSector = sampleId;
+        setActiveSector(sampleId);
+      }
+    }
+
     const sourceSampleMatch = sourceImageUrl?.match(/\/samples\/(10169|10815|6423)\./);
-    const sourceSampleId = isFloodNetSampleId(sampleId)
-      ? sampleId
+    const sourceSampleId = isFloodNetSampleId(targetSector)
+      ? targetSector
       : sourceSampleMatch && isFloodNetSampleId(sourceSampleMatch[1])
-        ? sourceSampleMatch[1]
+        ? (sourceSampleMatch[1] as FloodNetSampleId)
         : undefined;
+
     const analysisImage = sourceImageFile ||
       (sourceSampleId ? await loadFloodNetSampleImage(sourceSampleId) : undefined);
+
     if (!analysisImage) {
       setValidationError('Upload an image or choose a sample before starting image analysis.');
       return;
     }
 
+    // Preserve active image references for any questions throughout the thread
+    if (sourceImageFile) {
+      setActiveImageFile(sourceImageFile);
+    }
+    if (sourceImageUrl) {
+      setActiveImageUrl(sourceImageUrl);
+    }
+
+    // 3. Construct user message
     const userMsg: ChatMessage = existingUserMessage
       ? { ...existingUserMessage, image_file: analysisImage }
       : {
@@ -315,12 +365,8 @@ export default function ChatPage({ params }: ChatPageProps) {
           thread_id: threadId,
           role: 'user',
           content: textToSend || 'Initiating automated UAV sensor pass analysis.',
-          raw_image_url: imageFile
-            ? imagePreview || sourceImageUrl
-            : !sampleId
-              ? previousImageMessage?.raw_image_storage_path || sourceImageUrl || undefined
-              : sourceImageUrl || undefined,
-          image_file: imageFile || undefined,
+          raw_image_url: isFollowUpQuestion ? undefined : (sourceImageUrl || undefined),
+          image_file: isFollowUpQuestion ? undefined : (sourceImageFile || undefined),
           region_context: attachedRegion || undefined,
           created_at: new Date().toISOString(),
         };
@@ -345,12 +391,15 @@ export default function ChatPage({ params }: ChatPageProps) {
           ? previous.map((message) => message.id === userMsg.id ? displayUserMessage : message)
           : [...previous, displayUserMessage],
       );
+
       const analysis = await api.analyze({
         image: analysisImage,
+        sample_id: !sourceImageFile && sourceSampleId ? sourceSampleId : undefined,
         model: 'segformer',
         use_recommended: false,
         question: textToSend.trim() || undefined,
       });
+
       const citations: CitationClause[] = (analysis.retrieved_protocols || []).map((item) => ({
         id: item.citation_tag.replace(/^\[+|\]+$/g, ''),
         document: item.source_doc,
@@ -358,17 +407,33 @@ export default function ChatPage({ params }: ChatPageProps) {
         excerpt: item.snippet,
         relevance: item.similarity_score,
       }));
-      const assistantMsg: ChatMessage = {
-        id: `msg-resp-${Date.now()}`,
-        thread_id: threadId,
-        role: 'assistant',
-        content: analysis.markdown_report || 'The backend returned no situation report.',
-        raw_image_url: savedUserMessage.raw_image_storage_path || savedUserMessage.raw_image_url,
-        mask_image_url: analysis.overlay_url,
-        damage_stats: mapDamageStats(analysis.damage_metrics),
-        citations,
-        created_at: new Date().toISOString(),
-      };
+
+      // 4. Construct assistant message
+      // On follow-up questions, display the direct question answer without repeating the MaskViewer or DamageTable!
+      const assistantMsg: ChatMessage = isFollowUpQuestion
+        ? {
+            id: `msg-resp-${Date.now()}`,
+            thread_id: threadId,
+            role: 'assistant',
+            content: analysis.follow_up_answer || analysis.markdown_report || 'The analysis engine returned no response for this question.',
+            raw_image_url: undefined,
+            mask_image_url: undefined,
+            damage_stats: undefined,
+            citations: citations.length > 0 ? citations : undefined,
+            created_at: new Date().toISOString(),
+          }
+        : {
+            id: `msg-resp-${Date.now()}`,
+            thread_id: threadId,
+            role: 'assistant',
+            content: analysis.markdown_report || 'The backend returned no situation report.',
+            raw_image_url: savedUserMessage.raw_image_storage_path || savedUserMessage.raw_image_url || sourceImageUrl || undefined,
+            mask_image_url: analysis.overlay_url,
+            damage_stats: mapDamageStats(analysis.damage_metrics),
+            citations,
+            created_at: new Date().toISOString(),
+          };
+
       const savedAssistantMessage = await api.saveChatMessage(assistantMsg);
       setMessages((prev) => [...prev, savedAssistantMessage]);
     } catch (error) {
@@ -624,22 +689,6 @@ export default function ChatPage({ params }: ChatPageProps) {
                         sampleId={activeSector}
                         imageFile={msg.image_file || sourceImageMessage?.image_file}
                         classes={msg.damage_stats?.classes || []}
-                        showPassability={passabilityActiveMessages[msg.id] ?? false}
-                        onPassabilityChange={(metrics) => {
-                          setPassabilityMetricsMap((prev) => ({ ...prev, [msg.id]: metrics }));
-                        }}
-                        safeCorridorActive={passabilityActiveMessages[msg.id] ?? false}
-                        onSafeCorridorComputed={(corridor) => {
-                          setSafeCorridorResults((prev) => ({ ...prev, [msg.id]: corridor }));
-                          if (corridor) {
-                            const bld = corridor.targetBuildingId ? `from ${corridor.targetBuildingId} ` : '';
-                            setInputText(
-                              `Evacuation corridor routed ${bld}(${corridor.lengthMeters}m to boundary): ${
-                                corridor.isIsolated ? 'Obstruction detected, pathway isolated by floodwaters.' : 'Contiguous passable route identified.'
-                              } Assess passability for high-clearance rescue vehicles.`
-                            );
-                          }
-                        }}
                         onDamageMetricsChange={(metrics) => {
                           setMessages((previous) => previous.map((message) =>
                             message.id === msg.id
@@ -651,7 +700,7 @@ export default function ChatPage({ params }: ChatPageProps) {
                         onRegionSelect={(region) => {
                           setAttachedRegion(region);
                           setInputText(
-                            `Evaluate flood depth and structural passability at this ${region.class_name} zone.`
+                            `Evaluate flood depth and structural impact at this ${region.class_name} zone.`
                           );
                         }}
                       />
@@ -671,35 +720,37 @@ export default function ChatPage({ params }: ChatPageProps) {
                   </div>
                 </div>
 
-                {/* 10-Class Damage Distribution Table & Passability Analysis */}
+                {/* Damage Distribution Table */}
                 {msg.damage_stats && (
                   <div className="w-full">
-                    <DamageTable
-                      stats={msg.damage_stats}
-                      passabilityMetrics={passabilityMetricsMap[msg.id]}
-                      isPassabilityActive={passabilityActiveMessages[msg.id] ?? false}
-                      onAssessPassability={() => {
-                        setPassabilityActiveMessages((prev) => ({
-                          ...prev,
-                          [msg.id]: !prev[msg.id],
-                        }));
-                      }}
-                    />
+                    <DamageTable stats={msg.damage_stats} />
                   </div>
                 )}
 
-                {/* Action Bar: Copy & Regenerate */}
+                {/* Action Bar: Copy, Publish & Regenerate */}
                 <div className="flex items-center gap-3 pt-2 font-mono text-[11px] border-t border-slate-100">
                   <div className="flex items-center space-x-2">
-                    <button
-                      onClick={() => void handlePublishReport(msg)}
-                      disabled={publishedMessageIds.has(msg.id)}
-                      className="flex items-center space-x-1.5 px-2.5 py-1 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg text-slate-600 transition-colors shadow-2xs disabled:opacity-50"
-                      title="Publish this report to the community feed"
-                    >
-                      <ArrowRight className="w-3.5 h-3.5 text-cyan-700" />
-                      <span>{publishedMessageIds.has(msg.id) ? 'Published' : 'Publish report'}</span>
-                    </button>
+                    {msg.damage_stats && (
+                      publishedMessageIds.has(msg.id) ? (
+                        <Link
+                          href="/app/community"
+                          className="flex items-center space-x-1.5 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-lg text-emerald-800 font-semibold transition-colors shadow-2xs"
+                          title="View published report in the Community Feed (/app/community)"
+                        >
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Published to Community Feed &rarr;</span>
+                        </Link>
+                      ) : (
+                        <button
+                          onClick={() => void handlePublishReport(msg)}
+                          className="flex items-center space-x-1.5 px-2.5 py-1 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg text-slate-600 transition-colors shadow-2xs"
+                          title="Publish this report to the Community Feed (/app/community)"
+                        >
+                          <ArrowRight className="w-3.5 h-3.5 text-cyan-700" />
+                          <span>Publish report</span>
+                        </button>
+                      )
+                    )}
                     <button
                       onClick={() => handleCopyMessage(msg.id, msg.content)}
                       className="flex items-center space-x-1.5 px-2.5 py-1 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg text-slate-600 hover:text-slate-900 transition-colors shadow-2xs"
@@ -755,10 +806,40 @@ export default function ChatPage({ params }: ChatPageProps) {
           {/* Quick Prompt Starter Pills */}
           <div className="flex items-center space-x-2 overflow-x-auto pb-1 text-[11px] font-mono scrollbar-none">
             <button
-              onClick={() => submitPrompt('Summarize the visible flood damage.')}
+              onClick={() => submitPrompt('Summarize the visible flood damage in this scene.')}
               className="px-2.5 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg flex items-center space-x-1.5 transition-colors shrink-0"
             >
-              <span>Summarize visible damage</span>
+              <span>Summarize scene</span>
+            </button>
+            <button
+              onClick={() => submitPrompt('How many buildings are flooded in this image?')}
+              className="px-2.5 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg flex items-center space-x-1.5 transition-colors shrink-0"
+            >
+              <span>Flooded buildings</span>
+            </button>
+            <button
+              onClick={() => submitPrompt('Are the roads flooded and passable for emergency vehicles?')}
+              className="px-2.5 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg flex items-center space-x-1.5 transition-colors shrink-0"
+            >
+              <span>Road passability</span>
+            </button>
+            <button
+              onClick={() => submitPrompt('What is the overall severity score and triage tier?')}
+              className="px-2.5 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg flex items-center space-x-1.5 transition-colors shrink-0"
+            >
+              <span>Severity triage</span>
+            </button>
+            <button
+              onClick={() => submitPrompt('Which structures are safe and non-flooded?')}
+              className="px-2.5 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg flex items-center space-x-1.5 transition-colors shrink-0"
+            >
+              <span>Safe structures</span>
+            </button>
+            <button
+              onClick={() => submitPrompt('What emergency response actions and protocols should be initiated?')}
+              className="px-2.5 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg flex items-center space-x-1.5 transition-colors shrink-0"
+            >
+              <span>Priority protocols</span>
             </button>
           </div>
 

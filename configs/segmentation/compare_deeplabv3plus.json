@@ -1,0 +1,40 @@
+{
+  "dataset_root": "FloodNet",
+  "img_size": 512,
+  "batch_size": 1,
+  "warmup_images": 5,
+  "device": "auto",
+  "candidates": [
+    {
+      "name": "segformer_b3_original",
+      "model_name": "nvidia/mit-b3",
+      "checkpoint": "checkpoints/segformer_full/segformer_best.pt",
+      "pretrained_initialization": "nvidia/mit-b3 encoder; historical FloodNet fine-tune, training split provenance unknown",
+      "training_results": "results/segformer_full_finetune_results.json"
+    },
+    {
+      "name": "segformer_b3_retrained_398",
+      "model_name": "nvidia/mit-b3",
+      "checkpoint": "checkpoints/segformer_retrained_398/segformer_best.pt",
+      "pretrained_initialization": "nvidia/mit-b3 encoder and historical FloodNet checkpoint",
+      "training_results": "results/segformer_retrained_398.json"
+    },
+    {
+      "name": "segformer_b3_class_balanced",
+      "model_type": "segformer",
+      "model_name": "nvidia/mit-b3",
+      "checkpoint": "checkpoints/segformer_b3_class_balanced/segformer_best.pt",
+      "pretrained_initialization": "nvidia/mit-b3 and historical FloodNet checkpoint; class-aware image sampling",
+      "training_results": "results/segformer_b3_class_balanced.json"
+    },
+    {
+      "name": "deeplabv3plus_resnet50_finetuned",
+      "model_type": "deeplabv3plus",
+      "model_name": "DeepLabV3Plus/resnet50",
+      "encoder_name": "resnet50",
+      "pretrained_initialization": "segmentation-models-pytorch ResNet-50 encoder initialized from ImageNet",
+      "checkpoint": "checkpoints/deeplabv3plus_floodnet/deeplabv3plus_best.pt",
+      "training_results": "results/deeplabv3plus_floodnet.json"
+    }
+  ]
+}

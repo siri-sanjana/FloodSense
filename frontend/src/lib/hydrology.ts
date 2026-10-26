@@ -52,8 +52,31 @@ export const SCENE_SPECS = {
  * - Lowland road network (0.95m to 1.15m, submerged at 1.2m)
  * - Western Highland Ridge and elevated overpass (2.40m to 3.80m)
  */
-export function getDSMElevation(x: number, z: number): number {
-  // Regional west-to-east drainage slope (highland on west, floodplain on east)
+export function getDSMElevation(x: number, z: number, sectorId?: string): number {
+  if (sectorId === '10815') {
+    // Sector 10815: Dense residential floodplain with broad low-lying bowl and central drainage ditch
+    let elev = 1.65 - (x / 20) * 0.9;
+    const ditchCenter = Math.sin(z * 0.22) * 2.2;
+    const distDitch = Math.abs(x - ditchCenter);
+    if (distDitch < 4.8) {
+      elev -= Math.cos((distDitch / 4.8) * (Math.PI / 2)) ** 2 * 1.15;
+    }
+    elev += Math.sin(x * 0.45) * Math.cos(z * 0.45) * 0.18;
+    return Math.max(0.1, Math.min(3.85, elev));
+  }
+
+  if (sectorId === '6423') {
+    // Sector 6423: Perimeter retention swale with agricultural basin
+    let elev = 2.45 - (z / 18) * 1.4;
+    const basinDist = Math.hypot(x - 3, z - 2);
+    if (basinDist < 6.5) {
+      elev -= Math.cos((basinDist / 6.5) * (Math.PI / 2)) ** 2 * 1.4;
+    }
+    elev += Math.cos(x * 0.5) * 0.22;
+    return Math.max(0.1, Math.min(3.85, elev));
+  }
+
+  // Sector 10169 & General Baseline: Regional west-to-east drainage slope (highland on west, floodplain on east)
   let elev = 2.05 - (x / 18) * 1.35;
 
   // Meandering canal trough near x = 2.0 + sin(z * 0.18) * 1.6

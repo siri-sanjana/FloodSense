@@ -40,7 +40,7 @@ import {
 } from '../../components/three/FloodDigitalTwin3D';
 import { ImageSegmentationRelief3D } from '../../components/three/ImageSegmentationRelief3D';
 import { MaskViewer } from '../../components/MaskViewer';
-import { api } from '../../lib/api';
+import { api, type DamageMetrics } from '../../lib/api';
 import {
   FLOODNET_SAMPLES,
   loadFloodNetSampleImage,
@@ -72,6 +72,7 @@ export default function Standalone3DDigitalTwinPage() {
     imageWidth: number;
     imageHeight: number;
     modelName: string;
+    damageMetrics?: DamageMetrics;
   } | null>(null);
   const [isBuildingImage3d, setIsBuildingImage3d] = useState(false);
   const [image3dError, setImage3dError] = useState<string | null>(null);
@@ -166,7 +167,7 @@ export default function Standalone3DDigitalTwinPage() {
     return getHypsometricTable();
   }, []);
 
-  // Update object URL when file changes
+  // Update object URL when file changes and automatically trigger 3D reconstruction
   useEffect(() => {
     if (!uploadedImage) {
       setUploadedImageUrl(null);
@@ -176,6 +177,8 @@ export default function Standalone3DDigitalTwinPage() {
     const objectUrl = URL.createObjectURL(uploadedImage);
     setUploadedImageUrl(objectUrl);
     setActiveImageId('uploaded');
+    // Auto-trigger 3D reconstruction so digital twin updates immediately
+    void buildImage3d();
     return () => URL.revokeObjectURL(objectUrl);
   }, [uploadedImage]);
 
@@ -209,12 +212,11 @@ export default function Standalone3DDigitalTwinPage() {
         imageWidth: segmentation.image_size.width,
         imageHeight: segmentation.image_size.height,
         modelName: segmentation.model_display_name,
+        damageMetrics: segmentation.damage_metrics,
       });
 
       if (forcedView) {
         setActiveView(forcedView);
-      } else {
-        setActiveView('image3d');
       }
     } catch (error) {
       setImage3dError(error instanceof Error ? error.message : 'Could not reconstruct 3D surface.');
@@ -234,7 +236,7 @@ export default function Standalone3DDigitalTwinPage() {
     { id: 6, name: 'Tree', color: '#059669', desc: 'Riparian buffer vegetation canopy', count: 'Class 6' },
     { id: 7, name: 'Vehicle', color: '#7C3AED', desc: 'Mobile assets and transit vehicles', count: 'Class 7' },
     { id: 8, name: 'Pool', color: '#06B6D4', desc: 'Engineered stormwater retention basin', count: 'Class 8' },
-    { id: 9, name: 'Grass', color: '#4ADE80', desc: 'Pervious turf and drainage swales', count: 'Class 9' },
+    { id: 9, name: 'Grass -> Water', color: '#0284C7', desc: 'Grass pixels are merged into the Water class in inference', count: 'Class 9' },
   ];
 
   // SVG Hypsometric Curve Geometry Calculations
@@ -528,6 +530,9 @@ export default function Standalone3DDigitalTwinPage() {
             <FloodDigitalTwin3D
               initialWaterLevel={currentWaterLevel}
               sectorName={activeTitle}
+              sectorId={activeImageId}
+              detectedStructures={derivedAssets?.damageMetrics?.buildings?.detected_structures}
+              damageMetrics={derivedAssets?.damageMetrics}
               activeCameraPreset={cameraPreset}
               onCameraPresetChange={(p) => setCameraPreset(p)}
               onWaterLevelChange={(lvl) => setCurrentWaterLevel(lvl)}

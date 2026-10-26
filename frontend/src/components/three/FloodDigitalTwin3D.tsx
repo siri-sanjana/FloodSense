@@ -33,6 +33,7 @@ import {
   SCENE_SPECS,
   type HydrologyMetrics
 } from '../../lib/hydrology';
+import type { DetectedStructure, DamageMetrics } from '../../lib/api';
 
 export interface ClassStats {
   floodedBuildings: number;
@@ -54,6 +55,9 @@ export type CameraPreset = 'nadir' | 'oblique' | 'isometric' | 'orbit';
 interface FloodDigitalTwin3DProps {
   initialWaterLevel?: number; // Calibrated Stage Height in meters (0.0m to 4.0m)
   sectorName?: string;
+  sectorId?: string;
+  detectedStructures?: DetectedStructure[];
+  damageMetrics?: DamageMetrics;
   onWaterLevelChange?: (level: number) => void;
   onStatsChange?: (stats: ClassStats) => void;
   onSwitchToSwipe?: () => void;
@@ -65,7 +69,7 @@ interface FloodDigitalTwin3DProps {
 /**
  * Generates Marching Squares 3D topographic contour line segments at exact 0.5m elevation intervals.
  */
-function generateTopographicContours(): {
+function generateTopographicContours(sectorId?: string): {
   majorLinesGeo: THREE.BufferGeometry;
   minorLinesGeo: THREE.BufferGeometry;
 } {
@@ -94,10 +98,10 @@ function generateTopographicContours(): {
         const x0 = -halfSize + i * dx;
         const x1 = x0 + dx;
 
-        const e00 = getDSMElevation(x0, z0);
-        const e10 = getDSMElevation(x1, z0);
-        const e11 = getDSMElevation(x1, z1);
-        const e01 = getDSMElevation(x0, z1);
+        const e00 = getDSMElevation(x0, z0, sectorId);
+        const e10 = getDSMElevation(x1, z0, sectorId);
+        const e11 = getDSMElevation(x1, z1, sectorId);
+        const e01 = getDSMElevation(x0, z1, sectorId);
 
         const b0 = e00 >= h ? 1 : 0;
         const b1 = e10 >= h ? 2 : 0;
@@ -178,6 +182,9 @@ function generateTopographicContours(): {
 export const FloodDigitalTwin3D: React.FC<FloodDigitalTwin3DProps> = ({
   initialWaterLevel = 1.8,
   sectorName = 'FloodNet Survey Sector 10169',
+  sectorId = '10169',
+  detectedStructures,
+  damageMetrics,
   onWaterLevelChange,
   onStatsChange,
   onSwitchToSwipe,
@@ -338,7 +345,7 @@ export const FloodDigitalTwin3D: React.FC<FloodDigitalTwin3DProps> = ({
     for (let i = 0; i < posAttr.count; i++) {
       const x = posAttr.getX(i);
       const z = posAttr.getZ(i);
-      const elev = getDSMElevation(x, z);
+      const elev = getDSMElevation(x, z, sectorId);
       posAttr.setY(i, elev);
 
       // Initial clean terrain dry color palette
@@ -361,7 +368,7 @@ export const FloodDigitalTwin3D: React.FC<FloodDigitalTwin3DProps> = ({
     scene.add(terrain);
 
     // 4. Marching Squares Topographic Contour Lines (0.5m Intervals)
-    const { majorLinesGeo, minorLinesGeo } = generateTopographicContours();
+    const { majorLinesGeo, minorLinesGeo } = generateTopographicContours(sectorId);
     const contourGroup = new THREE.Group();
     contourGroupRef.current = contourGroup;
     scene.add(contourGroup);
@@ -391,32 +398,93 @@ export const FloodDigitalTwin3D: React.FC<FloodDigitalTwin3DProps> = ({
     datumGrid.position.y = 0.05;
     scene.add(datumGrid);
 
-    // 5. CLASS 1 & 2: BUILDINGS (Flooded vs. Safe)
+    // 5. CLASS 1 & 2: BUILDINGS (Dynamically derived from real image detection)
     const bldgGroup = new THREE.Group();
     buildingsGroupRef.current = bldgGroup;
     scene.add(bldgGroup);
 
-    const bldgData = [
-      // Lowland floodplain structures (vulnerable to rising stage)
-      { id: 'b1', x: 2, z: -8, w: 2.2, d: 2.2, h: 3.2, baseElev: 0.72, name: 'Riverside Warehouse' },
-      { id: 'b2', x: 4, z: -3, w: 2.6, d: 2.0, h: 3.6, baseElev: 0.95, name: 'Residential Block 10' },
-      { id: 'b3', x: 5, z: 2, w: 3.0, d: 2.2, h: 3.0, baseElev: 1.15, name: 'Primary School Annexe' },
-      { id: 'b4', x: 3, z: 7, w: 2.0, d: 2.4, h: 2.6, baseElev: 0.85, name: 'Canal Pump Station' },
-      { id: 'b5', x: 7, z: -6, w: 2.4, d: 2.4, h: 3.4, baseElev: 1.35, name: 'Commercial Depot' },
-      { id: 'b6', x: 8, z: 0, w: 2.8, d: 2.0, h: 3.8, baseElev: 1.55, name: 'Municipal Utility Hub' },
-      { id: 'b7', x: 7, z: 5, w: 2.2, d: 2.2, h: 2.8, baseElev: 1.45, name: 'Suburban Cluster East' },
-      // Highland safe structures (elevated western ridge)
-      { id: 'b8', x: -8, z: -5, w: 3.2, d: 2.8, h: 4.8, baseElev: 2.95, name: 'District General Hospital' },
-      { id: 'b9', x: -7, z: 1, w: 2.4, d: 2.2, h: 3.8, baseElev: 2.75, name: 'Emergency Operations Center' },
-      { id: 'b10', x: -6, z: 7, w: 2.2, d: 2.2, h: 3.2, baseElev: 2.60, name: 'Highland Shelter 1' },
-      { id: 'b11', x: -10, z: -1, w: 2.5, d: 2.0, h: 3.5, baseElev: 3.25, name: 'Civil Defense Headquarters' },
-      { id: 'b12', x: -9, z: 4, w: 2.0, d: 2.0, h: 3.0, baseElev: 3.10, name: 'Highland Communications Tower' },
-    ];
+    interface Building3DItem {
+      id: string;
+      x: number;
+      z: number;
+      w: number;
+      d: number;
+      h: number;
+      baseElev: number;
+      name: string;
+      isFloodedInitially?: boolean;
+    }
+
+    let bldgData: Building3DItem[] = [];
+
+    if (detectedStructures && detectedStructures.length > 0) {
+      // Image-specific structures: Extrude dynamically at exact coordinates
+      bldgData = detectedStructures.map((s, idx) => {
+        // Map normalized percentage [0, 100] to Three.js coordinates [-15, 15]
+        const wx = ((s.x + s.w / 2) / 100 - 0.5) * 30;
+        const wz = ((s.y + s.h / 2) / 100 - 0.5) * 30;
+        const bw = Math.max(1.8, Math.min(5.5, (s.w / 100) * 30));
+        const bd = Math.max(1.8, Math.min(5.5, (s.h / 100) * 30));
+        const elev = getDSMElevation(wx, wz, sectorId);
+        const bh = s.flooded ? 2.8 : 3.6;
+        return {
+          id: s.id || `STR-${101 + idx}`,
+          x: Math.round(wx * 10) / 10,
+          z: Math.round(wz * 10) / 10,
+          w: Math.round(bw * 10) / 10,
+          d: Math.round(bd * 10) / 10,
+          h: bh,
+          baseElev: elev,
+          name: `${s.label || 'Building'} ${s.id || idx + 1}`,
+          isFloodedInitially: s.flooded,
+        };
+      });
+    } else if (sectorId === '10815') {
+      // Sector 10815: Dense residential floodplain layout
+      bldgData = [
+        { id: 'STR-201', x: -5, z: -6, w: 2.5, d: 2.2, h: 3.2, baseElev: 1.1, name: 'Residential Block 201' },
+        { id: 'STR-202', x: -1, z: -4, w: 2.2, d: 2.0, h: 3.0, baseElev: 0.95, name: 'Submerged Dwelling 202' },
+        { id: 'STR-203', x: 4, z: -5, w: 2.8, d: 2.2, h: 3.4, baseElev: 1.2, name: 'Townhouse Cluster' },
+        { id: 'STR-204', x: 7, z: -3, w: 2.4, d: 2.0, h: 3.0, baseElev: 1.25, name: 'Community Center' },
+        { id: 'STR-205', x: -6, z: 2, w: 2.6, d: 2.2, h: 3.6, baseElev: 1.3, name: 'Residential Unit 205' },
+        { id: 'STR-206', x: 2, z: 3, w: 2.4, d: 2.0, h: 3.2, baseElev: 0.9, name: 'Canal Dwelling 206' },
+        { id: 'STR-207', x: 6, z: 4, w: 2.2, d: 2.4, h: 3.0, baseElev: 1.15, name: 'Residential Unit 207' },
+        { id: 'STR-208', x: -9, z: 7, w: 3.2, d: 2.6, h: 4.2, baseElev: 2.6, name: 'Highland Shelter North' },
+        { id: 'STR-209', x: -5, z: 8, w: 2.6, d: 2.2, h: 3.8, baseElev: 2.45, name: 'Emergency Command Post' },
+        { id: 'STR-210', x: 1, z: 8, w: 2.2, d: 2.0, h: 3.0, baseElev: 1.05, name: 'Lowland Habitation 210' },
+      ];
+    } else if (sectorId === '6423') {
+      // Sector 6423: Perimeter retention basin farmstead
+      bldgData = [
+        { id: 'STR-301', x: -7, z: -6, w: 3.2, d: 2.6, h: 3.8, baseElev: 2.2, name: 'Retention Control Station' },
+        { id: 'STR-302', x: -5, z: 1, w: 2.4, d: 2.2, h: 3.2, baseElev: 1.8, name: 'Agricultural Depot' },
+        { id: 'STR-303', x: 4, z: -3, w: 2.5, d: 2.5, h: 2.8, baseElev: 0.85, name: 'Canal Pump Station 6423' },
+        { id: 'STR-304', x: 6, z: 5, w: 2.6, d: 2.4, h: 3.0, baseElev: 0.9, name: 'Swale Farmstead' },
+        { id: 'STR-305', x: -8, z: 6, w: 2.8, d: 2.8, h: 4.0, baseElev: 2.8, name: 'Highland Farmhouse' },
+      ];
+    } else {
+      // Sector 10169 default calibrated buildings
+      bldgData = [
+        { id: 'STR-101', x: 2, z: -8, w: 2.2, d: 2.2, h: 3.2, baseElev: 0.72, name: 'Riverside Warehouse' },
+        { id: 'STR-102', x: 4, z: -3, w: 2.6, d: 2.0, h: 3.6, baseElev: 0.95, name: 'Residential Block 10' },
+        { id: 'STR-103', x: 5, z: 2, w: 3.0, d: 2.2, h: 3.0, baseElev: 1.15, name: 'Primary School Annexe' },
+        { id: 'STR-104', x: 3, z: 7, w: 2.0, d: 2.4, h: 2.6, baseElev: 0.85, name: 'Canal Pump Station' },
+        { id: 'STR-105', x: 7, z: -6, w: 2.4, d: 2.4, h: 3.4, baseElev: 1.35, name: 'Commercial Depot' },
+        { id: 'STR-106', x: 8, z: 0, w: 2.8, d: 2.0, h: 3.8, baseElev: 1.55, name: 'Municipal Utility Hub' },
+        { id: 'STR-107', x: 7, z: 5, w: 2.2, d: 2.2, h: 2.8, baseElev: 1.45, name: 'Suburban Cluster East' },
+        { id: 'STR-108', x: -8, z: -5, w: 3.2, d: 2.8, h: 4.8, baseElev: 2.95, name: 'District General Hospital' },
+        { id: 'STR-109', x: -7, z: 1, w: 2.4, d: 2.2, h: 3.8, baseElev: 2.75, name: 'Emergency Operations Center' },
+        { id: 'STR-110', x: -6, z: 7, w: 2.2, d: 2.2, h: 3.2, baseElev: 2.60, name: 'Highland Shelter 1' },
+        { id: 'STR-111', x: -10, z: -1, w: 2.5, d: 2.0, h: 3.5, baseElev: 3.25, name: 'Civil Defense Headquarters' },
+        { id: 'STR-112', x: -9, z: 4, w: 2.0, d: 2.0, h: 3.0, baseElev: 3.10, name: 'Highland Communications Tower' },
+      ];
+    }
 
     bldgData.forEach((b) => {
       const geo = new THREE.BoxGeometry(b.w, b.h, b.d);
+      const isInitiallyFlooded = b.isFloodedInitially ?? false;
       const mat = new THREE.MeshStandardMaterial({
-        color: 0x94a3b8,
+        color: isInitiallyFlooded ? 0xca8a04 : 0x94a3b8,
         roughness: 0.5,
         metalness: 0.1,
       });
@@ -429,7 +497,10 @@ export const FloodDigitalTwin3D: React.FC<FloodDigitalTwin3DProps> = ({
 
       // Roof cap
       const roofGeo = new THREE.BoxGeometry(b.w * 1.05, 0.35, b.d * 1.05);
-      const roofMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.7 });
+      const roofMat = new THREE.MeshStandardMaterial({
+        color: isInitiallyFlooded ? 0x991b1b : 0x334155,
+        roughness: 0.7,
+      });
       const roofMesh = new THREE.Mesh(roofGeo, roofMat);
       roofMesh.position.set(b.x, b.baseElev + b.h + 0.18, b.z);
       bldgGroup.add(roofMesh);
@@ -873,7 +944,7 @@ export const FloodDigitalTwin3D: React.FC<FloodDigitalTwin3DProps> = ({
       majorLinesGeo.dispose();
       minorLinesGeo.dispose();
     };
-  }, []);
+  }, [sectorId, detectedStructures]);
 
   // Sync rain state to particle system
   useEffect(() => {

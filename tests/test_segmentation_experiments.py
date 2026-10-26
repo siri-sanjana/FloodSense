@@ -64,6 +64,25 @@ class SegmentationExperimentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "batch_size of at least 2"):
             finetune.SegFormerTrainer(args)
 
+    def test_deeplab_floodnet_recipe_uses_full_official_split(self):
+        config_path = (
+            Path(__file__).resolve().parents[1]
+            / "configs"
+            / "segmentation"
+            / "deeplabv3plus_floodnet.json"
+        )
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(config["model_type"], "deeplabv3plus")
+        self.assertEqual(config["encoder_name"], "resnet50")
+        self.assertEqual(config["batch_size"], 2)
+        self.assertEqual(config["max_train_batches"], 0)
+        self.assertEqual(config["dataset_root"], "FloodNet")
+        self.assertNotEqual(
+            config["checkpoint_dir"],
+            "checkpoints/segformer_full",
+        )
+
     def test_training_and_evaluation_processors_match(self):
         image = Image.fromarray(
             np.random.default_rng(42).integers(

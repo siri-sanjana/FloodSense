@@ -59,7 +59,7 @@ CLASS_DISPLAY_COLORS = {
     2: (180, 120, 120),   # pink    (building non-flooded)
     3: (202, 138, 4),     # amber   (road flooded)
     4: (107, 114, 128),   # gray    (road non-flooded)
-    5: (6,   182, 212),   # cyan    (water)
+    5: (2,   132, 199),   # blue (water)
     6: (5,   150, 105),   # green   (tree)
     7: (124, 58,  237),   # purple  (vehicle)
     8: (234, 179, 8),     # yellow  (pool)
@@ -107,6 +107,85 @@ def count_components(binary_mask: np.ndarray, min_pixels: int = 100) -> tuple[in
     return len(sizes), sorted(sizes, reverse=True)
 
 
+def extract_component_bounding_boxes(
+    binary_mask: np.ndarray,
+    class_id: int,
+    class_name: str,
+    min_pixels: int = 200,
+    is_flooded: bool = False,
+    id_prefix: str = "STR",
+    image_shape: tuple = None,
+) -> tuple[int, list[int], list[dict]]:
+    """
+    Finds connected components in binary_mask, filters by min_pixels,
+    and returns:
+      - count: number of valid components
+      - sizes: sorted list of component pixel sizes (descending)
+      - boxes: list of bounding box dicts with normalized percentage coordinates:
+        { id, class_id, label, flooded, x, y, w, h, cx, cy, area_px, confidence }
+    """
+    labeled, num = ndimage.label(binary_mask)
+    if num == 0:
+        return 0, [], []
+
+    h, w = binary_mask.shape[:2] if image_shape is None else image_shape[:2]
+    slices = ndimage.find_objects(labeled)
+
+    sizes = []
+    boxes = []
+
+    for region_id, slc in enumerate(slices, start=1):
+        if slc is None:
+            continue
+        comp_mask = (labeled[slc] == region_id)
+        sz = int(np.sum(comp_mask))
+        if sz < min_pixels:
+            continue
+
+        sizes.append(sz)
+
+        # slc[0] is rows (y), slc[1] is cols (x)
+        ymin, ymax = slc[0].start, slc[0].stop
+        xmin, xmax = slc[1].start, slc[1].stop
+        box_w_px = max(1, xmax - xmin)
+        box_h_px = max(1, ymax - ymin)
+
+        # Coordinate transforms: Normalize strictly to [0, 100] percentage bounds
+        x_pct = round(max(0.0, min(100.0, (xmin / w) * 100)), 2)
+        y_pct = round(max(0.0, min(100.0, (ymin / h) * 100)), 2)
+        w_pct = round(max(0.5, min(100.0 - x_pct, (box_w_px / w) * 100)), 2)
+        h_pct = round(max(0.5, min(100.0 - y_pct, (box_h_px / h) * 100)), 2)
+        cx_pct = round(x_pct + w_pct / 2, 2)
+        cy_pct = round(y_pct + h_pct / 2, 2)
+
+        # Confidence: ratio of component pixels to bounding box area + size stability
+        bbox_area = max(1, box_w_px * box_h_px)
+        fill_density = min(1.0, sz / bbox_area)
+        confidence = round(min(0.99, max(0.50, 0.55 + 0.40 * fill_density)), 2)
+
+        boxes.append({
+            "id": "",
+            "class_id": class_id,
+            "label": class_name,
+            "flooded": is_flooded,
+            "x": x_pct,
+            "y": y_pct,
+            "w": w_pct,
+            "h": h_pct,
+            "cx": cx_pct,
+            "cy": cy_pct,
+            "area_px": sz,
+            "confidence": confidence,
+        })
+
+    # Sort largest component first
+    boxes.sort(key=lambda b: b["area_px"], reverse=True)
+    for i, b in enumerate(boxes, start=1):
+        b["id"] = f"{id_prefix}-{i:03d}"
+
+    return len(sizes), sorted(sizes, reverse=True), boxes
+
+
 def pixel_area_m2(pixel_count: int, image_shape: tuple,
                   uav_altitude_m: float = 30.0, fov_deg: float = 73.0) -> float:
     """
@@ -143,14 +222,34 @@ def extract_damage_info(mask_path: str, image_path: str = None) -> dict:
         class_pixel_counts[label] = cnt
         class_pixel_pct[label]    = round(cnt / total_pixels * 100, 3)
 
-    # ── Buildings ──
+    # ── Buildings & Precise Bounding Boxes ──
     flooded_building_mask     = (class_mask == 1).astype(np.uint8)
     non_flooded_building_mask = (class_mask == 2).astype(np.uint8)
 
-    flooded_bldg_count, flooded_bldg_sizes = count_components(
-        flooded_building_mask, MIN_BUILDING_PIXELS)
-    non_flooded_bldg_count, non_flooded_bldg_sizes = count_components(
-        non_flooded_building_mask, MIN_BUILDING_PIXELS)
+    flooded_bldg_count, flooded_bldg_sizes, flooded_bldg_boxes = extract_component_bounding_boxes(
+        flooded_building_mask,
+        class_id=1,
+        class_name="Building (Flooded)",
+        min_pixels=MIN_BUILDING_PIXELS,
+        is_flooded=True,
+        id_prefix="STR-F",
+        image_shape=(h, w),
+    )
+    non_flooded_bldg_count, non_flooded_bldg_sizes, non_flooded_bldg_boxes = extract_component_bounding_boxes(
+        non_flooded_building_mask,
+        class_id=2,
+        class_name="Building (Safe)",
+        min_pixels=MIN_BUILDING_PIXELS,
+        is_flooded=False,
+        id_prefix="STR-S",
+        image_shape=(h, w),
+    )
+
+    # Combine into unified structures list with consistent sequential IDs: STR-101, STR-102...
+    all_building_boxes = flooded_bldg_boxes + non_flooded_bldg_boxes
+    all_building_boxes.sort(key=lambda b: b["area_px"], reverse=True)
+    for idx, b in enumerate(all_building_boxes, start=101):
+        b["id"] = f"STR-{idx}"
 
     flooded_bldg_pixels = int(np.sum(flooded_building_mask))
     non_flooded_bldg_pixels = int(np.sum(non_flooded_building_mask))
@@ -167,7 +266,15 @@ def extract_damage_info(mask_path: str, image_path: str = None) -> dict:
 
     # ── Vehicles ──
     vehicle_mask                  = (class_mask == 7).astype(np.uint8)
-    vehicle_count, vehicle_sizes  = count_components(vehicle_mask, MIN_VEHICLE_PIXELS)
+    vehicle_count, vehicle_sizes, vehicle_boxes = extract_component_bounding_boxes(
+        vehicle_mask,
+        class_id=7,
+        class_name="Vehicle",
+        min_pixels=MIN_VEHICLE_PIXELS,
+        is_flooded=False,
+        id_prefix="VEH",
+        image_shape=(h, w),
+    )
     vehicle_pixels                = int(np.sum(vehicle_mask))
 
     # ── Pool / standing water ──
@@ -208,6 +315,8 @@ def extract_damage_info(mask_path: str, image_path: str = None) -> dict:
     water_area_m2            = pixel_area_m2(water_pixels,            (h, w))
     total_flood_area_m2      = pixel_area_m2(flood_pixels,            (h, w))
 
+    all_detected_objects = all_building_boxes + vehicle_boxes
+
     report = {
         "mask_file":               os.path.basename(mask_path),
         "image_file":              os.path.basename(image_path) if image_path else None,
@@ -229,6 +338,7 @@ def extract_damage_info(mask_path: str, image_path: str = None) -> dict:
             "total_building_count":           flooded_bldg_count + non_flooded_bldg_count,
             "building_flood_ratio":           round(
                 flooded_bldg_count / max(1, flooded_bldg_count + non_flooded_bldg_count), 3),
+            "detected_structures":            all_building_boxes,
         },
         "roads": {
             "flooded_road_coverage_pct":      flooded_road_pct,
@@ -245,7 +355,9 @@ def extract_damage_info(mask_path: str, image_path: str = None) -> dict:
             "vehicle_count":      vehicle_count,
             "vehicle_area_pct":   round(vehicle_pixels / total_pixels * 100, 3),
             "vehicle_sizes_px":   vehicle_sizes[:5],
+            "detected_vehicles":  vehicle_boxes,
         },
+        "detected_objects":             all_detected_objects,
         "class_pixel_distribution_pct": class_pixel_pct,
     }
 

@@ -76,6 +76,21 @@ export interface SegmentResponse {
   error?: string;
 }
 
+export interface DetectedStructure {
+  id: string;
+  class_id?: number;
+  label?: string;
+  flooded?: boolean;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  cx?: number;
+  cy?: number;
+  area_px?: number;
+  confidence?: number;
+}
+
 export interface DamageMetrics {
   damage_summary?: {
     damage_severity_score?: number;
@@ -87,10 +102,16 @@ export interface DamageMetrics {
     flooded_building_count?: number;
     non_flooded_building_count?: number;
     total_building_count?: number;
+    detected_structures?: DetectedStructure[];
   };
   roads?: {
     flooded_road_coverage_pct?: number;
   };
+  vehicles?: {
+    vehicle_count?: number;
+    detected_vehicles?: DetectedStructure[];
+  };
+  detected_objects?: DetectedStructure[];
   class_pixel_counts?: Record<string, number>;
   class_pixel_distribution_pct?: Record<string, number>;
 }

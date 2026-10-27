@@ -19,6 +19,9 @@ Usage:
 """
 
 import sys
+import io
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 import json
 import time
 import argparse
@@ -155,15 +158,6 @@ class FloodNetDataset(Dataset):
                     and img_path.stat().st_size > 5000
                     and mask_path.stat().st_size > 500
                 ):
-                    try:
-                        self.cache[(img_path, mask_path)] = self._load_pair(
-                            img_path, mask_path
-                        )
-                    except (OSError, ValueError) as exc:
-                        self.skipped_pairs.append(
-                            {"image": img_path.name, "reason": str(exc)}
-                        )
-                        continue
                     self.valid_pairs.append((img_path, mask_path))
 
         self.unmapped_pixel_count = sum(
@@ -206,7 +200,10 @@ class FloodNetDataset(Dataset):
         img_path, mask_path = self.valid_pairs[idx]
         cache_key = (img_path, mask_path)
         if cache_key not in self.cache:
-            self.cache[cache_key] = self._load_pair(img_path, mask_path)
+            try:
+                self.cache[cache_key] = self._load_pair(img_path, mask_path)
+            except Exception:
+                return self.__getitem__((idx + 1) % len(self.valid_pairs))
         image_array, class_mask = self.cache[cache_key]
         img = Image.fromarray(image_array)
         mask_img = Image.fromarray(class_mask)
@@ -290,6 +287,104 @@ class DiceFocalLoss(nn.Module):
         self,
         num_classes=10,
         alpha=0.25,
+        gamma=2.0,
+        dice_weight=0.5,
+        class_weights=None,
+    ):
+        super().__init__()
+def _lovasz_grad(gt_sorted):
+    """Computes gradient of the Lovasz extension w.r.t sorted errors."""
+    p = len(gt_sorted)
+    gts = gt_sorted.sum()
+    intersection = gts - gt_sorted.float().cumsum(0)
+    union = gts + (1.0 - gt_sorted.float()).cumsum(0)
+    jaccard = 1.0 - intersection / torch.clamp(union, min=1e-7)
+    jaccard_diff = jaccard.clone()
+    if p > 1:
+        jaccard_diff[1:p] = jaccard[1:p] - jaccard[0:-1]
+    return jaccard_diff
+
+
+def _lovasz_softmax_flat(probas, labels, classes="present"):
+    """
+    Multi-class Lovasz-Softmax loss on flattened inputs.
+    probas: [P, C] class probabilities at each pixel
+    labels: [P] ground truth class indices
+    """
+    if probas.numel() == 0:
+        return probas * 0.0
+
+    C = probas.size(1)
+    losses = []
+    class_to_sum = list(range(C)) if classes in ("all", "present") else classes
+
+    for c in class_to_sum:
+        fg = (labels == c).float()
+        if classes == "present" and fg.sum() == 0:
+            continue
+        errors = (fg - probas[:, c]).abs()
+        errors_sorted, perm = torch.sort(errors, 0, descending=True)
+        grad = _lovasz_grad(fg[perm]).detach()
+        losses.append(torch.dot(errors_sorted, grad))
+
+    if len(losses) == 0:
+        return torch.tensor(0.0, device=probas.device, requires_grad=True)
+    return torch.stack(losses).mean()
+
+
+class LovaszSoftmaxLoss(nn.Module):
+    """
+    Lovasz-Softmax surrogate loss for Multi-Class Semantic Segmentation.
+    Always computed in float32 for numerical stability.
+    """
+    def __init__(self, classes="present"):
+        super().__init__()
+        self.classes = classes
+
+    def forward(self, logits, labels):
+        probas = F.softmax(logits.float(), dim=1)
+        return _lovasz_softmax_flat(
+            probas.permute(0, 2, 3, 1).contiguous().view(-1, probas.size(1)),
+            labels.view(-1),
+            classes=self.classes,
+        )
+
+
+class CompoundIoULoss(nn.Module):
+    """
+    Combines Focal Loss (handling class frequencies) + Lovasz-Softmax (direct IoU booster).
+    Always computed in float32 to prevent float16 overflow.
+    """
+    def __init__(self, class_weights=None, lovasz_weight=0.6, focal_gamma=2.0):
+        super().__init__()
+        self.lovasz_weight = lovasz_weight
+        self.lovasz = LovaszSoftmaxLoss(classes="present")
+        self.gamma = focal_gamma
+        if class_weights is not None:
+            self.register_buffer("weights", torch.as_tensor(class_weights, dtype=torch.float32))
+        else:
+            self.weights = None
+
+    def forward(self, logits, targets):
+        logits = logits.float()
+        targets = targets.long()
+        ce = F.cross_entropy(logits, targets, weight=self.weights, reduction="none")
+        p = F.softmax(logits, dim=1)
+        pt = p.gather(1, targets.unsqueeze(1)).squeeze(1)
+        focal = ((1.0 - pt).clamp(0.0, 1.0) ** self.gamma) * ce
+        focal_loss = focal.mean()
+
+        lovasz_loss = self.lovasz(logits, targets)
+
+        loss = (1.0 - self.lovasz_weight) * focal_loss + self.lovasz_weight * lovasz_loss
+        return loss
+
+
+class DiceFocalLoss(nn.Module):
+    def __init__(
+        self,
+        num_classes,
+        alpha=1.0,
         gamma=2.0,
         dice_weight=0.5,
         class_weights=None,
@@ -609,8 +704,21 @@ class SegFormerTrainer:
             return None
 
         counts = np.zeros(NUM_CLASSES, dtype=np.int64)
-        for img_path, mask_path in dataset.valid_pairs:
-            class_mask = dataset.cache[(img_path, mask_path)][1]
+        # Sample up to 100 images to quickly estimate balanced class frequencies without blocking
+        sample_pairs = dataset.valid_pairs[:100] if len(dataset.valid_pairs) > 100 else dataset.valid_pairs
+        for img_path, mask_path in sample_pairs:
+            cache_key = (img_path, mask_path)
+            if cache_key in dataset.cache:
+                class_mask = dataset.cache[cache_key][1]
+            else:
+                try:
+                    with Image.open(mask_path) as mask_file:
+                        mask_img = mask_file.convert("RGB").resize(
+                            (dataset.img_size, dataset.img_size), Image.Resampling.NEAREST
+                        )
+                    class_mask = dataset._rgb_to_class(np.array(mask_img)).astype(np.uint8)
+                except Exception:
+                    continue
             counts += np.bincount(
                 class_mask.ravel(),
                 minlength=NUM_CLASSES,
@@ -705,7 +813,8 @@ class SegFormerTrainer:
 
             if (i + 1) % accum_steps == 0 or (i + 1) == epoch_batches:
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-                self.optimizer.step()
+                scaler.step(self.optimizer)
+                scaler.update()
                 self.optimizer.zero_grad()
 
             total_loss += loss.item()
@@ -770,22 +879,29 @@ class SegFormerTrainer:
         print("=" * 60)
         self.training_start_time = time.perf_counter()
 
+        last_val_m = {"mIoU": 0.0, "overall_pixel_accuracy": 0.0, "macro_f1": 0.0, "per_class": {}}
         for epoch in range(1, self.args.epochs + 1):
             t0 = time.time()
             learning_rate = self.optimizer.param_groups[0]["lr"]
             train_loss = self._train_one_epoch(epoch)
             self.scheduler.step()
-            val_m = self._validate()
-            elapsed = time.time() - t0
 
-            is_best = val_m["mIoU"] > self.best_miou + self.args.min_delta
-            if is_best:
-                self.best_miou = val_m["mIoU"]
-                self.best_epoch = epoch
-                self.epochs_without_improvement = 0
+            should_val = (epoch % getattr(self.args, "val_interval", 1) == 0) or (epoch == self.args.epochs)
+            if should_val:
+                val_m = self._validate()
+                last_val_m = val_m
+                is_best = val_m["mIoU"] > self.best_miou + self.args.min_delta
+                if is_best:
+                    self.best_miou = val_m["mIoU"]
+                    self.best_epoch = epoch
+                    self.epochs_without_improvement = 0
+                else:
+                    self.epochs_without_improvement += 1
             else:
-                self.epochs_without_improvement += 1
+                val_m = last_val_m
+                is_best = False
 
+            elapsed = time.time() - t0
             self.history["train_loss"].append(round(train_loss, 4))
             self.history["val_mIoU"].append(round(val_m["mIoU"], 4))
             self.history["val_pixel_acc"].append(round(val_m["overall_pixel_accuracy"], 4))

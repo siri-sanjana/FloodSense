@@ -723,7 +723,17 @@ export default function ChatPage({ params }: ChatPageProps) {
                 {/* Damage Distribution Table */}
                 {msg.damage_stats && (
                   <div className="w-full">
-                    <DamageTable stats={msg.damage_stats} />
+                    <DamageTable
+                      stats={msg.damage_stats}
+                      passabilityMetrics={passabilityMetricsMap[msg.id]}
+                      isPassabilityActive={passabilityActiveMessages[msg.id] ?? false}
+                      onAssessPassability={() => {
+                        setPassabilityActiveMessages((prev) => ({
+                          ...prev,
+                          [msg.id]: !prev[msg.id],
+                        }));
+                      }}
+                    />
                   </div>
                 )}
 

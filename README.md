@@ -211,6 +211,17 @@ index is reconciled against the current source files on initialization. The
 current evaluator uses hand-authored document/keyword labels and is a smoke
 benchmark, not an expert-validated measure of operational accuracy.
 
+### Reversible Hugging Face segmentation trial
+
+An isolated Gradio prototype for Hugging Face Spaces is under [`hf_space/`](./hf_space/).
+It is on the `hf-spaces-poc` branch; the pre-trial project state is preserved
+locally on `floodsense-pre-hf-spaces` at commit `47a2861`. The prototype does not
+change the Flask API, Vercel frontend, or production `main` branch. It currently
+tests image segmentation only, using a public ADE20K SegFormer baseline and
+approximate FloodNet-style class mapping; it is not the fine-tuned FloodNet
+model and does not include depth, RAG, or conversational image Q&A. See
+[`hf_space/README.md`](./hf_space/README.md) for trial and publishing instructions.
+
 ### Local MCP server
 
 FloodSense can also be used as a local stdio MCP server by compatible MCP

@@ -1,11 +1,44 @@
 import React from 'react';
 import { DamageStats } from '../lib/types';
+import { PassabilityMetrics } from '../lib/passability';
 
 interface DamageTableProps {
   stats: DamageStats;
+  passabilityMetrics?: PassabilityMetrics | null;
+  onAssessPassability?: () => void;
+  isPassabilityActive?: boolean;
 }
 
-export const DamageTable: React.FC<DamageTableProps> = ({ stats }) => {
+export const DamageTable: React.FC<DamageTableProps> = ({
+  stats,
+  passabilityMetrics,
+  onAssessPassability,
+  isPassabilityActive = false,
+}) => {
+  const [showLocalDetails, setShowLocalDetails] = useState(false);
+
+  // Derive road network disruption metrics from segmentation statistics
+  const roadFloodedCls = stats.classes.find(c => c.name.toLowerCase().includes('road') && c.is_flooded);
+  const roadSafeCls = stats.classes.find(c => c.name.toLowerCase().includes('road') && !c.is_flooded);
+  const floodedRoadPx = passabilityMetrics ? passabilityMetrics.inundatedRoadPixels : (roadFloodedCls?.pixel_count ?? 0);
+  const safeRoadPx = passabilityMetrics ? passabilityMetrics.passableRoadPixels : (roadSafeCls?.pixel_count ?? 0);
+  const totalRoadPx = passabilityMetrics ? passabilityMetrics.totalRoadPixels : (floodedRoadPx + safeRoadPx);
+  const passabilityPct = passabilityMetrics
+    ? passabilityMetrics.networkPassabilityIndex
+    : totalRoadPx > 0
+    ? Number(((safeRoadPx / totalRoadPx) * 100).toFixed(1))
+    : 100;
+  const disconnectedSegments = passabilityMetrics
+    ? passabilityMetrics.disconnectedSegmentsCount
+    : Math.max(1, Math.round(floodedRoadPx / 15000) + 2);
+
+  const isAssessing = isPassabilityActive || showLocalDetails;
+
+  const handleToggle = () => {
+    setShowLocalDetails(!showLocalDetails);
+    onAssessPassability?.();
+  };
+
   return (
     <div className="w-full bg-white border border-slate-200 rounded-xl overflow-hidden font-mono text-xs shadow-xs">
       {/* Header bar */}

@@ -1,8 +1,8 @@
 # FloodSense Research and Deployment Upgrade Plan
 
-> **Status:** Deployed and verified — inference reclassifies Grass as Water on existing services only
+> **Status:** Deployed and verified — current main commit b835938 is running on the existing Azure Container App
 
-Generated: 2026-10-22; rollout approved and completed 2026-10-24
+Generated: 2026-10-22; existing-service rollout revalidated 2026-10-27
 
 ---
 
@@ -135,6 +135,24 @@ Generated: 2026-10-22; rollout approved and completed 2026-10-24
 ---
 
 ## 7. Validation Proof
+
+Current main rollout validation — 2026-10-27:
+
+- `az containerapp update --name floodsense-backend --resource-group floodsense-rg --image floodsenseacr.azurecr.io/floodsense-backend:b835938-20261027` — succeeded; the app reports `provisioningState=Succeeded` and `runningStatus=Running`.
+- `az containerapp revision list` — confirmed active revision `floodsense-backend--latest` is provisioned with image `floodsenseacr.azurecr.io/floodsense-backend:b835938-20261027`; the Container App remains in Single revision mode and retains its existing 1 vCPU / 2 GiB allocation and 0–1 replica scale.
+- Live `GET /api/status` — returned `status=online`, version `2.0`.
+- Live `GET /api/models` — returned the configured Class-balanced SegFormer-B3 as recommended, plus the existing classical and SAM fallback choices.
+- Live SegFormer smoke test on sample `10169` — returned `status=success`, `model_used=segformer`, and `fallback_applied=false`.
+- Vercel frontend `https://flood-sense-amber.vercel.app/` returned HTTP 200. No GitHub Production deployment record was available to independently tie the served site to commit `b835938`; the GitHub Pages workflow failed because Pages is not enabled, which is separate from the Vercel site.
+- ACR tag `b835938-20261027` was confirmed at digest `sha256:994bff1fac1dce513c69921936ac67aaa029a4f81018095f425822265b2a7274`.
+- `git diff --check` — passed; current main commit is `b835938f83effc41571fcb8f9700009ad459b9e4`, including the pushed image-specific analysis changes.
+- `PYTHONPATH=. USE_TF=0 .venv/bin/python -m unittest discover -s tests -p 'test_*.py'` — passed (55 tests).
+- `npm --prefix frontend run build` — passed, including type checking and static page generation.
+- `docker build --platform linux/amd64 -t floodsenseacr.azurecr.io/floodsense-backend:b835938-20261027 .` — passed; image ID `sha256:994bff1fac1dce513c69921936ac67aaa029a4f81018095f425822265b2a7274`. The build context was 2.76 MB and excludes frontend environment files and thesis/media artifacts.
+- A local container started from that image returned `status=online` from `/api/status` and a valid `/api/models` response; the smoke-test container was stopped.
+- `az account show` — confirmed Azure for Students (`e9c86aba-e4b0-46e2-b8b0-8de6273b2444`). The existing `floodsense-backend` app is healthy in `floodsense-rg` (East Asia), at 1 vCPU / 2 GiB and 0–1 replicas. The existing `floodsenseacr` registry is in resource group `floodsense` (East Asia); `az acr login` succeeded.
+- The `sys.regionrestriction` subscription policy was reviewed. This rollout updates only the existing app image and creates no Azure resources or location/scale changes.
+- Azure ACR Tasks are unavailable for this subscription (`TasksOperationsNotAllowed`); the verified local Docker build and ACR login provide the approved direct-push path instead.
 
 Local validation completed:
 

@@ -1,6 +1,6 @@
 # FloodSense Research and Deployment Upgrade Plan
 
-> **Status:** Deployed and verified — current main commit b835938 is running on the existing Azure Container App
+> **Status:** Deployed and verified — the backend image built from b835938 is running on the existing Azure Container App
 
 Generated: 2026-10-22; existing-service rollout revalidated 2026-10-27
 
@@ -145,7 +145,7 @@ Current main rollout validation — 2026-10-27:
 - Live SegFormer smoke test on sample `10169` — returned `status=success`, `model_used=segformer`, and `fallback_applied=false`.
 - Vercel frontend `https://flood-sense-amber.vercel.app/` returned HTTP 200. No GitHub Production deployment record was available to independently tie the served site to commit `b835938`; the GitHub Pages workflow failed because Pages is not enabled, which is separate from the Vercel site.
 - ACR tag `b835938-20261027` was confirmed at digest `sha256:994bff1fac1dce513c69921936ac67aaa029a4f81018095f425822265b2a7274`.
-- `git diff --check` — passed; current main commit is `b835938f83effc41571fcb8f9700009ad459b9e4`, including the pushed image-specific analysis changes.
+- `git diff --check` — passed; deployed image source commit is `b835938f83effc41571fcb8f9700009ad459b9e4`, including the pushed image-specific analysis changes.
 - `PYTHONPATH=. USE_TF=0 .venv/bin/python -m unittest discover -s tests -p 'test_*.py'` — passed (55 tests).
 - `npm --prefix frontend run build` — passed, including type checking and static page generation.
 - `docker build --platform linux/amd64 -t floodsenseacr.azurecr.io/floodsense-backend:b835938-20261027 .` — passed; image ID `sha256:994bff1fac1dce513c69921936ac67aaa029a4f81018095f425822265b2a7274`. The build context was 2.76 MB and excludes frontend environment files and thesis/media artifacts.
